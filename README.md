@@ -1,9 +1,4 @@
-# 📄 Automated Insurance Correspondence Generator
-`                      __/___          `   
-`             _____/______|           `
-`     _______/_____\_______\_____     `
-`     \              < < <       |    `
-`      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  `
+# 📄 AutoMailerPro v5.1
 **Author:** Kyle Padilla  
 **Contact:** scooby_rizz@proton.me
 

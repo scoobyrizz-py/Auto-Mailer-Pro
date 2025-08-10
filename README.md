@@ -20,7 +20,7 @@
 ## 📖 Overview
 This Python script processes sales data from an Excel file to generate personalized letters, envelopes, and mailing labels for owner-occupied properties.
 
-It is designed for **Jones Insurance Advisors, INC.** to automate outreach to homeowners, using public data such as:
+It is designed for businesses to automate outreach to homeowners, using public data such as:
 
 - Property addresses
 - Sale dates

@@ -1,8 +1,9 @@
 # 📄 AutoMailerPro v5.1
 **Author:** Kyle Padilla  
-**Contact:** scooby_rizz@proton.me
-
+**Contact:** scooby_rizz@protonmail.com  
+**GitHub:** [scoobyrizz-py](https://github.com/scoobyrizz-py)
 ---
+
 
 ## 📚 Table of Contents
 - [Overview](#overview)

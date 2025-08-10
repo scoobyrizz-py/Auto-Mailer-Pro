@@ -378,13 +378,7 @@ def main():
             dict_writer.writerows(crm_rows)
         print(f"📥 CRM-ready CSV saved to: {CRM_EXPORT_FILE}")
 
-
-if __name__ == "__main__":
-    main()
-
-
-
-### PRINTS CREDITS  ###
+        ### PRINTS CREDITS  ###
 
 def print_logo():
     logo = r"""
@@ -402,3 +396,11 @@ def print_logo():
     print(logo)
 
 print_logo()
+
+
+if __name__ == "__main__":
+    main()
+
+
+
+

@@ -44,12 +44,32 @@ root.configure(bg=BG_COLOR)
 
 frame = tk.Frame(root, bg=BG_COLOR, padx=15, pady=15)
 frame.pack(fill='both', expand=True)
+credits_text = (
+    "AutoMailerPro v5.1\n"
+    "Author: Kyle Padilla\n"
+    "Last Updated: 08/09/2025\n"
+    "Jones Insurance Advisors, Inc."
+)
+
+credits_label = tk.Label(frame, text=credits_text, bg=BG_COLOR, font=("Segoe UI", 9), justify="center")
+credits_label.pack(pady=(0, 15))
+
 
 run_button = tk.Button(frame, text="Run AutoMailerPro_v5.1", command=run_script,
                        font=FONT, bg=BUTTON_BG, fg=BUTTON_FG,
                        activebackground="#005a9e", activeforeground="white",
                        relief="flat", padx=10, pady=5)
 run_button.pack(pady=(0, 15))
+boat_art = """
+                  __/___
+         _____/______|
+ _______/_____\_______\_____
+ \              < < <       |
+  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+"""
+
+boat_label = tk.Label(frame, text=boat_art, bg=BG_COLOR, font=("Courier New", 12), justify="center")
+boat_label.pack(pady=(5,15))
 
 output_text = scrolledtext.ScrolledText(frame, width=80, height=20, state='disabled',
                                         font=("Consolas", 10), bg=TEXT_BG, fg=TEXT_FG,

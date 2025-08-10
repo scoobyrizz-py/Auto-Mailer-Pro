@@ -1,7 +1,4 @@
 #!/usr/bin/env python3
-
-  ### PRINT HEADER IN TERMINAL
-
 """
 InsuranceMailer v1.0
 Author: Kyle Padilla
@@ -270,7 +267,7 @@ def create_labels(label_data):
     label_width = Inches(2.63)
     label_height = Inches(1.0)
 
-    # Calculate how many rows you need
+    # CALCULATE HOW MANY ROWS NEEDED
     num_rows = (len(label_data) + labels_per_row - 1) // labels_per_row
 
     table = doc.add_table(rows=num_rows, cols=labels_per_row)
@@ -387,7 +384,7 @@ if __name__ == "__main__":
 
 
 
-### Prints the credits in the terminal ###
+### PRINTS CREDITS  ###
 
 def print_logo():
     logo = r"""

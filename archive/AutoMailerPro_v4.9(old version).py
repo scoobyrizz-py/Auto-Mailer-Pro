@@ -175,7 +175,7 @@ def lookup_owner_info(owner_name, city, state):
         print(f"API lookup error for {owner_name}: {e}")
         return "", ""
 
-    # "X-RapidAPI-Key": "b6ff07f33bmsh5d8a96a3d9c7988p1d77b5jsn7ea8f0880f7f",
+    # "X-RapidAPI-Key": "",
 
 
 # === ADD LETTER TO DOC ===

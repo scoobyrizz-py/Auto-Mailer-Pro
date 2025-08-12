@@ -143,7 +143,7 @@ def is_owner_occupied(property_address, mailing_address):
 import requests
 
 # Replace with your RapidAPI credentials
-API_KEY = "b6ff07f33bmsh5d8a96a3d9c7988p1d77b5jsn7ea8f0880f7f"
+API_KEY = 
 
 def lookup_owner_info(owner_name, city, state):
     url = "https://yellow-pages3.p.rapidapi.com/businesses/search"

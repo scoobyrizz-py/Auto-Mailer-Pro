@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 InsuranceMailer v1.0
@@ -7,10 +8,11 @@ Contact: scooby_rizz@proton.me
 
 Description:
     Automated script to generate personalized letters, envelopes,
-    and mailing labels for owner-occupied properties using sales data.
+    and mailing labels for owner-occupied properties (personal) or businesses (commercial).
 
 Usage:
     python InsuranceMailer_v1.0.py
+    OR called from GUI with mode, file_path, content, and subject_line parameters.
 
 Requirements:
     pandas, python-docx, fuzzywuzzy, python-Levenshtein
@@ -21,15 +23,6 @@ __author__ = "Kyle Padilla"
 __company__ = "Jones Insurance Advisors, Inc."
 __contact__ = "scooby_rizz@proton.me"
 
-def main():
-    print(f"InsuranceMailer v{__version__} by {__author__} - {__company__}")
-
-
-### MAIN CODE AUTO MAILER PRO
-
-if __name__ == "__main__":
-    main()
-
 import os
 import pandas as pd
 from datetime import datetime
@@ -39,11 +32,7 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from fuzzywuzzy import fuzz
 import csv
 
-
-
-
 # === CONFIG ===
-EXCEL_FILE = "sales_data.xlsx"
 ZIP_LOOKUP_FILE = "zip_lookup.csv"
 LOGO_PATH = "logo.png"
 
@@ -56,22 +45,6 @@ YOUR_ADDRESS = "3885 20th Street,\n Vero Beach, FL 32960"
 YOUR_WEB = "www.jonesinsuranceadvisors.com"
 YOUR_RETURN_ADDRESS = f"{YOUR_NAME}\n{YOUR_ADDRESS}"
 
-# Create output directory with timestamp
-OUTPUT_DIR = "090124_101524_Mailing Campaign"
-LETTERS_FILE = os.path.join(OUTPUT_DIR, "all_letters.docx")
-ENVELOPES_FILE = os.path.join(OUTPUT_DIR, "all_envelopes.docx")
-LABELS_FILE = os.path.join(OUTPUT_DIR, "mailing_labels.docx")
-CRM_EXPORT_FILE = os.path.join(OUTPUT_DIR, "crm_owner_occupied.csv")
-
-# Create output directory if it doesn't exist
-if not os.path.exists(OUTPUT_DIR):
-    os.makedirs(OUTPUT_DIR)
-    print(f"📁 Created output folder: {OUTPUT_DIR}")
-    
-# === DOCUMENTS ===
-letters_doc = Document()
-envelopes_doc = Document()
-
 # === ZIP TO CITY/STATE LOOKUP ===
 zip_city_state = {}
 
@@ -80,7 +53,6 @@ def load_zip_lookup():
     if not os.path.exists(ZIP_LOOKUP_FILE):
         print(f"❌ Missing ZIP lookup file: {ZIP_LOOKUP_FILE}")
         return
-
     df = pd.read_csv(ZIP_LOOKUP_FILE, dtype=str)
     for _, row in df.iterrows():
         zip_code = row['zip'].zfill(5)
@@ -88,53 +60,47 @@ def load_zip_lookup():
         zip_city_state[zip_code] = city_state
 
 def zip_to_city_state(zip_code):
-    zip_code = zip_code.zfill(5)  # Ensure 5-digit format
+    zip_code = str(zip_code).zfill(5)
     city_state = zip_city_state.get(zip_code, "Indian River County, FL")
-    return f"{city_state} {zip_code}"  # Append ZIP to the end
+    return f"{city_state} {zip_code}"
 
-# === CLEAN OWNER NAME ===
-def clean_owner_name(raw_name):
-    name_parts = [part.strip() for part in raw_name.split('||')]
-    last_names = []
-    first_names = []
-
-    for part in name_parts:
-        # Remove suffix in parentheses like (LE)
-        name_no_suffix = part.split('(')[0].strip()
-        words = name_no_suffix.split()
-        if len(words) >= 2:
-            last_names.append(words[0].title())
-            first_names.append(words[1].title())
-        elif len(words) == 1:
-            # If only one word, treat it as first name (no last name)
-            last_names.append("")
-            first_names.append(words[0].title())
+# === CLEAN NAME ===
+def clean_name(raw_name, mode):
+    raw_name = str(raw_name)
+    if mode == "personal":
+        name_parts = [part.strip() for part in raw_name.split('||')]
+        last_names = []
+        first_names = []
+        for part in name_parts:
+            name_no_suffix = part.split('(')[0].strip()
+            words = name_no_suffix.split()
+            if len(words) >= 2:
+                last_names.append(words[0].title())
+                first_names.append(words[1].title())
+            elif len(words) == 1:
+                last_names.append("")
+                first_names.append(words[0].title())
+            else:
+                last_names.append("")
+                first_names.append("")
+        unique_last_names = set([ln for ln in last_names if ln])
+        if len(unique_last_names) == 1:
+            last_name = unique_last_names.pop()
+            combined_first_names = " & ".join([fn for fn in first_names if fn])
+            full_name = f"{combined_first_names} {last_name}".strip()
         else:
-            last_names.append("")
-            first_names.append("")
+            full_name = " & ".join(
+                [f"{fn} {ln}".strip() for fn, ln in zip(first_names, last_names) if fn or ln]
+            )
+        return full_name or "Valued Customer"
+    else:  # commercial
+        return raw_name.title() or "Valued Business"
 
-    # Check if all last names are the same and non-empty
-    unique_last_names = set([ln for ln in last_names if ln])
-
-    if len(unique_last_names) == 1:
-        # Same last name for all, join first names & append last name once
-        last_name = unique_last_names.pop()
-        combined_first_names = " & ".join(first_names)
-        full_name = f"{combined_first_names} {last_name}"
-    else:
-        # Different last names, join full names normally
-        full_name = " & ".join(
-            [f"{fn} {ln}".strip() for fn, ln in zip(first_names, last_names)]
-        )
-
-    return full_name
-
-
-# === OWNER-OCCUPIED CHECK ===
+# === FILTERS ===
 def is_owner_occupied(property_address, mailing_address):
     try:
-        prop_addr = property_address.lower().strip()
-        mailing_parts = mailing_address.split('|')
+        prop_addr = str(property_address).lower().strip()
+        mailing_parts = str(mailing_address).split('|')
         for part in mailing_parts:
             if fuzz.partial_ratio(prop_addr, part.lower().strip()) > 85:
                 return True
@@ -142,13 +108,16 @@ def is_owner_occupied(property_address, mailing_address):
     except:
         return False
 
+def is_valid_business(business_type):
+    # Define valid business types (customize as needed)
+    valid_types = ["Retail", "Office", "Restaurant", "Manufacturing", "Services"]
+    return str(business_type).strip() in valid_types
 
 # === ADD LETTER TO DOC ===
-def add_letter_to_doc(doc, owner_name, address, zip_code, sale_date, sale_price):
+def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line):
     today = datetime.now().strftime('%B %d, %Y')
 
     def add_compact_paragraph(text="", bold=False, space_before=0, space_after=2):
-        """Add a paragraph with tight spacing."""
         para = doc.add_paragraph()
         para.paragraph_format.space_before = Pt(space_before)
         para.paragraph_format.space_after = Pt(space_after)
@@ -156,64 +125,33 @@ def add_letter_to_doc(doc, owner_name, address, zip_code, sale_date, sale_price)
         run.bold = bold
         return para
 
-    # Add top padding for letterhead (normal spacing here)
     for _ in range(4):
         doc.add_paragraph()
 
-    # Date at the top (tight spacing)
     add_compact_paragraph(today, space_after=48)
+    greeting = f"Dear {name},"
+    add_compact_paragraph(greeting, space_after=24)
 
-    # Greeting (tight spacing)
-    add_compact_paragraph(f"Dear {owner_name},", space_after=24)
+    # Use the provided subject line (bolded)
+    add_compact_paragraph(subject_line, bold=True, space_after=10)
 
-    # Hook (tight spacing + bold)
-    add_compact_paragraph(
-        "Homeowners Insurance Rates Are Finally on the Decline – Don’t Miss Out!",
-        bold=True,
-        space_after=10
-    )
-
-    # Determine county name
     city_state = zip_to_city_state(zip_code)
-    county_name = "Indian River"
-    if "County" in city_state:
-        county_name = city_state.split("County")[0].strip()
+    county_name = "Indian River" if "County" in city_state else city_state.split("County")[0].strip()
+    personalized_content = content.replace("[Name]", name).replace("[County]", county_name)
 
-    # Letter body (normal spacing)
-    body_text = (
-        "For the first time in years, homeowners rates are coming down — and the savings could be significant.\n\n"
-        "Recent legislative changes have boosted competition in Florida’s property insurance market, "
-        f"and many {county_name} County homeowners are already benefiting.\n\n"
-        "Jones Insurance Advisors is a two-generation, family-owned independent agency located right here in Vero Beach. "
-        "Our team of dedicated agents possess extensive knowledge of the intricacies of the local insurance market, "
-        "and are excited to assist you in finding the most comprehensive and competitively priced insurance solutions.\n\n"
-        "Call us today for a free, no-obligation quote, or visit our website below and complete a quote request, "
-        "and one of our dedicated agents will reach out to you!\n\n"
-        "We look forward to earning your business and providing you the personal, dedicated service you have come to "
-        "expect by doing business locally.\n\n"
-        "Warm Regards,"
-    )
-    doc.add_paragraph(body_text)
+    doc.add_paragraph(personalized_content)
 
-    # Signature image
     if os.path.exists("signature_brian.png"):
         doc.add_picture("signature_brian.png", width=Inches(1.5), height=Inches(0.5))
 
-    # Signature block
     doc.add_paragraph(
         f"{YOUR_NAME}\n{YOUR_TITLE}\n{YOUR_EMAIL}\n{YOUR_PHONE}\n{YOUR_WEB}"
     )
 
     doc.add_page_break()
 
-
-
 # === ADD ENVELOPE TO DOC ===
-from docx.shared import Pt, Inches
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-def add_envelope_to_doc(doc, owner_name, address, zip_code):
-    # Add a new section for each envelope with correct size and margins
+def add_envelope_to_doc(doc, name, address, zip_code):
     section = doc.add_section()
     section.page_width = Inches(9.5)
     section.page_height = Inches(4.125)
@@ -222,39 +160,27 @@ def add_envelope_to_doc(doc, owner_name, address, zip_code):
     section.top_margin = Inches(0.5)
     section.bottom_margin = Inches(0.5)
 
-    # Add return address paragraph - left aligned, small font
     sender = doc.add_paragraph(YOUR_RETURN_ADDRESS)
-    sender.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    sender.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     for run in sender.runs:
         run.font.size = Pt(10)
 
-    # Add a paragraph with specific spacing to push recipient block down
     spacer = doc.add_paragraph()
-    spacer.paragraph_format.space_before = Pt(40)  # Adjust to move recipient block down
+    spacer.paragraph_format.space_before = Pt(40)
 
-    # Recipient address block centered
     recipient = doc.add_paragraph()
-    recipient.alignment = WD_ALIGN_PARAGRAPH.CENTER
-
-    # Owner name bold, font size 14pt
-    name_run = recipient.add_run(f"{owner_name}\n")
+    recipient.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
+    name_run = recipient.add_run(f"{name}\n")
     name_run.bold = True
     name_run.font.size = Pt(14)
-
-    # Address and city/state/zip normal font size 14pt
     addr_run = recipient.add_run(f"{address}\n{zip_to_city_state(zip_code)}")
     addr_run.font.size = Pt(14)
 
-    # Add a page break to ensure next envelope starts fresh
     doc.add_page_break()
 
-
-
-
 # === CREATE LABELS DOC ===
-def create_labels(label_data):
+def create_labels(label_data, labels_file):
     doc = Document()
-
     section = doc.sections[0]
     section.page_width = Inches(8.5)
     section.page_height = Inches(11)
@@ -266,8 +192,6 @@ def create_labels(label_data):
     labels_per_row = 3
     label_width = Inches(2.63)
     label_height = Inches(1.0)
-
-    # CALCULATE HOW MANY ROWS NEEDED
     num_rows = (len(label_data) + labels_per_row - 1) // labels_per_row
 
     table = doc.add_table(rows=num_rows, cols=labels_per_row)
@@ -276,10 +200,9 @@ def create_labels(label_data):
 
     for col in table.columns:
         col.width = label_width
-
     for row in table.rows:
         row.height = label_height
-        row.height_rule = 2  # EXACTLY
+        row.height_rule = 2
 
     idx = 0
     for row in table.rows:
@@ -288,87 +211,144 @@ def create_labels(label_data):
                 lines = label_data[idx].split("\n")
                 para = cell.paragraphs[0]
                 para.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-
                 if lines:
                     name_run = para.add_run(lines[0] + "\n")
                     name_run.bold = True
                     name_run.font.size = Pt(10.5)
-
                 for line in lines[1:]:
                     addr_run = para.add_run(line + "\n")
                     addr_run.font.size = Pt(10.5)
-
                 idx += 1
             else:
                 cell.text = ""
 
-    doc.save(LABELS_FILE)
-    print(f"✅ Mailing labels saved to: {LABELS_FILE}")
-
+    doc.save(labels_file)
+    print(f"✅ Mailing labels saved to: {labels_file}")
 
 # === MAIN ===
-def main():
+def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_line=""):
+    if mode not in ["personal", "commercial"]:
+        raise ValueError("Mode must be 'personal' or 'commercial'")
+    if not subject_line:
+        if mode == "personal":
+            subject_line = "Homeowners Insurance Rates Are Finally on the Decline – Don’t Miss Out!"
+        else:
+            subject_line = "Protect Your Business with Tailored Insurance Solutions!"
+
+    if content is None:
+        if mode == "personal":
+            content = (
+                "For the first time in years, homeowners rates are coming down — and the savings could be significant.\n\n"
+                "Recent legislative changes have boosted competition in Florida’s property insurance market, "
+                "and many [County] County homeowners are already benefiting.\n\n"
+                "Jones Insurance Advisors is a two-generation, family-owned independent agency located right here in Vero Beach. "
+                "Our team of dedicated agents possess extensive knowledge of the intricacies of the local insurance market, "
+                "and are excited to assist you in finding the most comprehensive and competitively priced insurance solutions.\n\n"
+                "Call us today for a free, no-obligation quote, or visit our website below and complete a quote request, "
+                "and one of our dedicated agents will reach out to you!\n\n"
+                "We look forward to earning your business and providing you the personal, dedicated service you have come to "
+                "expect by doing business locally.\n\n"
+                "Warm Regards,"
+            )
+        else:
+            content = (
+                "Protecting your business is our priority at Jones Insurance Advisors.\n\n"
+                "As a [County] County business, you need insurance solutions tailored to your unique needs. "
+                "Our experienced team specializes in crafting comprehensive coverage plans for businesses like yours, "
+                "ensuring protection against risks while keeping costs competitive.\n\n"
+                "Jones Insurance Advisors, a family-owned agency in Vero Beach, is here to help. "
+                "Contact us for a free consultation to discuss how we can safeguard your business.\n\n"
+                "We look forward to partnering with you!\n\n"
+                "Best Regards,"
+            )
+
+    timestamp = datetime.now().strftime("%m%d%y_%H%M%S")
+    OUTPUT_DIR = f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
+    LETTERS_FILE = os.path.join(OUTPUT_DIR, "all_letters.docx")
+    ENVELOPES_FILE = os.path.join(OUTPUT_DIR, "all_envelopes.docx")
+    LABELS_FILE = os.path.join(OUTPUT_DIR, "mailing_labels.docx")
+    CRM_EXPORT_FILE = os.path.join(OUTPUT_DIR, f"crm_{mode}_occupied.csv")
+
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+        print(f"📁 Created output folder: {OUTPUT_DIR}")
+
+    letters_doc = Document()
+    envelopes_doc = Document()
+
     load_zip_lookup()
 
-    if not os.path.exists(EXCEL_FILE):
-        print(f"❌ File not found: {EXCEL_FILE}")
-        return
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Excel file not found: {file_path}")
 
     try:
-        df = pd.read_excel(EXCEL_FILE)
+        df = pd.read_excel(file_path)
     except Exception as e:
-        print(f"⚠️ Failed to read Excel file: {e}")
-        return
+        raise Exception(f"Failed to read Excel file: {e}")
 
     labels = []
     crm_rows = []
 
     for _, row in df.iterrows():
         try:
-            raw_owner = str(row['Owner Name'])
-            address = str(row['Address']).title().strip()
-            zip_code = str(row['Site Zip Code']).strip()
-            mailing_address = str(row['Mailing Address']).strip()
-            sale_date_raw = str(row['Sale Date']).strip()
-            sale_price_str = str(row['Sale Price']).replace('$', '').replace(',', '').strip()
-            sale_price = float(sale_price_str)
+            if mode == "personal":
+                name_key = 'Owner Name'
+                filter_check = is_owner_occupied(row.get('Address', ''), row.get('Mailing Address', ''))
+                filter_desc = "non-owner-occupied"
+            else:  # commercial
+                name_key = 'Business Name'
+                filter_check = is_valid_business(row.get('Business Type', ''))
+                filter_desc = "invalid business type"
 
-            if not is_owner_occupied(address, mailing_address):
-                print(f"⏭️ Skipping non-owner-occupied: {raw_owner}")
+            name = str(row.get(name_key, ''))
+            if not name:
+                print(f"⏭️ Skipping row with missing {name_key}")
                 continue
 
-            owner_name = clean_owner_name(raw_owner)
-            sale_date = datetime.strptime(sale_date_raw, '%m/%d/%Y').strftime('%B %d, %Y')
+            address = str(row.get('Address', '')).title().strip()
+            zip_code = str(row.get('Site Zip Code', '')).strip()
+            mailing_address = str(row.get('Mailing Address', '')).strip()
+            sale_date_raw = str(row.get('Sale Date', '')).strip()
+            sale_price_str = str(row.get('Sale Price', '')).replace('$', '').replace(',', '').strip()
 
-            add_letter_to_doc(letters_doc, owner_name, address, zip_code, sale_date, sale_price)
-            add_envelope_to_doc(envelopes_doc, owner_name, address, zip_code)
+            if not filter_check:
+                print(f"⏭️ Skipping {filter_desc}: {name}")
+                continue
 
-            label_text = f"{owner_name}\n{address}\n{zip_to_city_state(zip_code)}"
+            name = clean_name(name, mode)
+            try:
+                sale_price = float(sale_price_str) if sale_price_str else 0.0
+            except ValueError:
+                sale_price = 0.0
+            try:
+                sale_date = datetime.strptime(sale_date_raw, '%m/%d/%Y').strftime('%B %d, %Y') if sale_date_raw else "Unknown"
+            except ValueError:
+                sale_date = "Unknown"
+
+            add_letter_to_doc(letters_doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line)
+            add_envelope_to_doc(envelopes_doc, name, address, zip_code)
+
+            label_text = f"{name}\n{address}\n{zip_to_city_state(zip_code)}"
             labels.append(label_text)
 
             crm_rows.append({
-                'Name': owner_name,   # Using full cleaned owner name
+                'Name': name,
                 'Address': address,
                 'Zip': zip_code,
                 'Sale Date': sale_date,
                 'Sale Price': sale_price,
                 'Email': '',
                 'Phone': '',
-                'Source': 'Homeowner Anniversary Mailer-Sept-Oct'
+                'Source': f"{mode.capitalize()} Anniversary Mailer-Sept-Oct"
             })
 
-            print(f"✅ Processed: {owner_name}")
+            print(f"✅ Processed: {name}")
 
         except Exception as e:
             print(f"⚠️ Skipped row due to error: {e}")
 
-    letters_doc.save(LETTERS_FILE)
-    envelopes_doc.save(ENVELOPES_FILE)
-    print(f"📄 All letters saved to: {LETTERS_FILE}")
-    print(f"✉️ All envelopes saved to: {ENVELOPES_FILE}")
-
     if labels:
-        create_labels(labels)
+        create_labels(labels, LABELS_FILE)
 
     if crm_rows:
         keys = crm_rows[0].keys()
@@ -378,7 +358,10 @@ def main():
             dict_writer.writerows(crm_rows)
         print(f"📥 CRM-ready CSV saved to: {CRM_EXPORT_FILE}")
 
-        ### PRINTS CREDITS  ###
+    letters_doc.save(LETTERS_FILE)
+    envelopes_doc.save(ENVELOPES_FILE)
+    print(f"📄 All letters saved to: {LETTERS_FILE}")
+    print(f"✉️ All envelopes saved to: {ENVELOPES_FILE}")
 
 def print_logo():
     logo = r"""
@@ -395,12 +378,6 @@ def print_logo():
     """
     print(logo)
 
-print_logo()
-
-
 if __name__ == "__main__":
+    print_logo()
     main()
-
-
-
-

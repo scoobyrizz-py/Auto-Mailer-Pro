@@ -18,7 +18,7 @@ Requirements:
     pandas, python-docx, fuzzywuzzy, python-Levenshtein
 """
 
-__version__ = "1.0"
+__version__ = "6.0"
 __author__ = "Kyle Padilla"
 __company__ = "Jones Insurance Advisors, Inc."
 __contact__ = "scooby_rizz@proton.me"
@@ -253,7 +253,7 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
         else:
             content = (
                 "Protecting your business is our priority at Jones Insurance Advisors.\n\n"
-                "As a [County] County business, you need insurance solutions tailored to your unique needs. "
+                "As an Indian River County business, you need insurance solutions tailored to your unique needs. "
                 "Our experienced team specializes in crafting comprehensive coverage plans for businesses like yours, "
                 "ensuring protection against risks while keeping costs competitive.\n\n"
                 "Jones Insurance Advisors, a family-owned agency in Vero Beach, is here to help. "

@@ -1,5 +1,5 @@
   <p align="center">
-    <img src="logo.png" alt="Auto Mailer Pro Logo" width="300">
+    <img src="Logo.png" alt="Auto Mailer Pro Logo" width="300">
   </p>
 
   # Auto Mailer Pro v6.0

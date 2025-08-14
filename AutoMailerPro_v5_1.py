@@ -240,7 +240,7 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
             content = (
                 "For the first time in years, homeowners rates are coming down — and the savings could be significant.\n\n"
                 "Recent legislative changes have boosted competition in Florida’s property insurance market, "
-                "and many [County] County homeowners are already benefiting.\n\n"
+                "and many Indian River County homeowners are already benefiting.\n\n"
                 "Jones Insurance Advisors is a two-generation, family-owned independent agency located right here in Vero Beach. "
                 "Our team of dedicated agents possess extensive knowledge of the intricacies of the local insurance market, "
                 "and are excited to assist you in finding the most comprehensive and competitively priced insurance solutions.\n\n"

@@ -77,11 +77,11 @@ root.geometry("1000x825")
 main_frame = ttk.Frame(root, padding="10")
 main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
-# Add logo at the top
-logo_path = os.path.join("logo.png")  # Adjust path if needed
+# Add logo 
+logo_path = os.path.join("logo.png")  # Adjust path 
 if os.path.exists(logo_path):
     logo_image = tk.PhotoImage(file=logo_path)
-    # Scale down the image if it's too large (optional, adjust size as needed)
+    # Scale down the image
     logo_image = logo_image.subsample(2, 2)  # Reduce size by factor of 2
     logo_label = ttk.Label(main_frame, image=logo_image)
     logo_label.image = logo_image  # Keep a reference to avoid garbage collection

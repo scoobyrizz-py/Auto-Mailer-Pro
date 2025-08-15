@@ -1,7 +1,6 @@
-
 #!/usr/bin/env python3
 """
-InsuranceMailer v1.0
+Auto Mailer Pro v5.1
 Author: Kyle Padilla
 Company: Jones Insurance Advisors, Inc.
 Contact: scooby_rizz@proton.me
@@ -11,14 +10,14 @@ Description:
     and mailing labels for owner-occupied properties (personal) or businesses (commercial).
 
 Usage:
-    python InsuranceMailer_v1.0.py
-    OR called from GUI with mode, file_path, content, and subject_line parameters.
+    python AutoMailerPro_v5_1.py
+    OR called from GUI with mode, file_path, content, subject_line, signature_name, signature_title, signature_image, and signature_email parameters.
 
 Requirements:
     pandas, python-docx, fuzzywuzzy, python-Levenshtein
 """
 
-__version__ = "6.0"
+__version__ = "5.1"
 __author__ = "Kyle Padilla"
 __company__ = "Jones Insurance Advisors, Inc."
 __contact__ = "scooby_rizz@proton.me"
@@ -36,14 +35,10 @@ import csv
 ZIP_LOOKUP_FILE = "zip_lookup.csv"
 LOGO_PATH = "logo.png"
 
-YOUR_NAME = "Brian Jones"
-YOUR_TITLE = "Vice President"
 YOUR_CO = "Jones Insurance Advisors, Inc"
 YOUR_PHONE = "(772) 569-6802"
-YOUR_EMAIL = "Brian@jonesia.com"
 YOUR_ADDRESS = "3885 20th Street,\n Vero Beach, FL 32960"
 YOUR_WEB = "www.jonesinsuranceadvisors.com"
-YOUR_RETURN_ADDRESS = f"{YOUR_NAME}\n{YOUR_ADDRESS}"
 
 # === ZIP TO CITY/STATE LOOKUP ===
 zip_city_state = {}
@@ -109,12 +104,11 @@ def is_owner_occupied(property_address, mailing_address):
         return False
 
 def is_valid_business(business_type):
-    # Define valid business types (customize as needed)
     valid_types = ["Retail", "Office", "Restaurant", "Manufacturing", "Services"]
     return str(business_type).strip() in valid_types
 
 # === ADD LETTER TO DOC ===
-def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line):
+def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line, signature_name, signature_title, signature_image, signature_email):
     today = datetime.now().strftime('%B %d, %Y')
 
     def add_compact_paragraph(text="", bold=False, space_before=0, space_after=2):
@@ -132,7 +126,6 @@ def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, conte
     greeting = f"Dear {name},"
     add_compact_paragraph(greeting, space_after=24)
 
-    # Use the provided subject line (bolded)
     add_compact_paragraph(subject_line, bold=True, space_after=10)
 
     city_state = zip_to_city_state(zip_code)
@@ -141,17 +134,19 @@ def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, conte
 
     doc.add_paragraph(personalized_content)
 
-    if os.path.exists("signature_brian.png"):
-        doc.add_picture("signature_brian.png", width=Inches(1.5), height=Inches(0.5))
+    if os.path.exists(signature_image):
+        doc.add_picture(signature_image, width=Inches(1.5), height=Inches(0.5))
+    else:
+        print(f"❌ Signature image not found: {signature_image}")
 
     doc.add_paragraph(
-        f"{YOUR_NAME}\n{YOUR_TITLE}\n{YOUR_EMAIL}\n{YOUR_PHONE}\n{YOUR_WEB}"
+        f"{signature_name}\n{signature_title}\n{signature_email}\n{YOUR_PHONE}\n{YOUR_WEB}"
     )
 
     doc.add_page_break()
 
 # === ADD ENVELOPE TO DOC ===
-def add_envelope_to_doc(doc, name, address, zip_code):
+def add_envelope_to_doc(doc, name, address, zip_code, signature_name):
     section = doc.add_section()
     section.page_width = Inches(9.5)
     section.page_height = Inches(4.125)
@@ -160,7 +155,8 @@ def add_envelope_to_doc(doc, name, address, zip_code):
     section.top_margin = Inches(0.5)
     section.bottom_margin = Inches(0.5)
 
-    sender = doc.add_paragraph(YOUR_RETURN_ADDRESS)
+    return_address = f"{signature_name}\n{YOUR_ADDRESS}"
+    sender = doc.add_paragraph(return_address)
     sender.alignment = WD_PARAGRAPH_ALIGNMENT.LEFT
     for run in sender.runs:
         run.font.size = Pt(10)
@@ -226,7 +222,9 @@ def create_labels(label_data, labels_file):
     print(f"✅ Mailing labels saved to: {labels_file}")
 
 # === MAIN ===
-def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_line=""):
+def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_line="", 
+         signature_name="Brian Jones", signature_title="Vice President", 
+         signature_image="signature_brian.png", signature_email="Brian@jonesia.com"):
     if mode not in ["personal", "commercial"]:
         raise ValueError("Mode must be 'personal' or 'commercial'")
     if not subject_line:
@@ -325,8 +323,8 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
             except ValueError:
                 sale_date = "Unknown"
 
-            add_letter_to_doc(letters_doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line)
-            add_envelope_to_doc(envelopes_doc, name, address, zip_code)
+            add_letter_to_doc(letters_doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line, signature_name, signature_title, signature_image, signature_email)
+            add_envelope_to_doc(envelopes_doc, name, address, zip_code, signature_name)
 
             label_text = f"{name}\n{address}\n{zip_to_city_state(zip_code)}"
             labels.append(label_text)
@@ -372,7 +370,7 @@ def print_logo():
       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  
        Auto Mailer Pro v5.1
        Author: Kyle Padilla
-       Last Updated: 08/09/2025
+       Last Updated: 08/14/2025
        
            Version: 05.01
     """

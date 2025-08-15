@@ -33,6 +33,7 @@ import csv
 
 # === CONFIG ===
 ZIP_LOOKUP_FILE = "zip_lookup.csv"
+MASTER_CLIENT_LIST = "master_client_list.xlsx"
 LOGO_PATH = "logo.png"
 
 YOUR_CO = "Jones Insurance Advisors, Inc"
@@ -59,10 +60,36 @@ def zip_to_city_state(zip_code):
     city_state = zip_city_state.get(zip_code, "Indian River County, FL")
     return f"{city_state} {zip_code}"
 
+# === LOAD CLIENT LIST FOR SCRUBBING ===
+def load_client_list():
+    if not os.path.exists(MASTER_CLIENT_LIST):
+        print(f"❌ Master client list not found: {MASTER_CLIENT_LIST}")
+        return []
+    try:
+        df = pd.read_excel(MASTER_CLIENT_LIST)
+        return df[['Name', 'Mailing Address']].dropna().to_dict('records')
+    except Exception as e:
+        print(f"⚠️ Failed to load master client list: {e}")
+        return []
+
+# === CHECK IF RECORD IS IN CLIENT LIST ===
+def is_existing_client(name, mailing_address, client_list):
+    if not client_list:
+        return False
+    name = str(name).lower().strip()
+    mailing_address = str(mailing_address).lower().strip()
+    for client in client_list:
+        client_name = str(client.get('Name', '')).lower().strip()
+        client_address = str(client.get('Mailing Address', '')).lower().strip()
+        if (fuzz.partial_ratio(name, client_name) > 85 and
+            fuzz.partial_ratio(mailing_address, client_address) > 85):
+            return True
+    return False
+
 # === CLEAN NAME ===
-def clean_name(raw_name, mode):
-    raw_name = str(raw_name)
+def clean_name(row, mode):
     if mode == "personal":
+        raw_name = str(row.get('Owner Name', ''))
         name_parts = [part.strip() for part in raw_name.split('||')]
         last_names = []
         first_names = []
@@ -89,7 +116,13 @@ def clean_name(raw_name, mode):
             )
         return full_name or "Valued Customer"
     else:  # commercial
-        return raw_name.title() or "Valued Business"
+        first_name = str(row.get('Executive First Name', '')).strip()
+        last_name = str(row.get('Executive Last Name', '')).strip()
+        if first_name and last_name:
+            return f"{first_name.title()} {last_name.title()}"
+        legal_name = str(row.get('Legal Name', '')).strip()
+        company_name = str(row.get('Company Name', '')).strip()
+        return legal_name.title() or company_name.title() or "Valued Business"
 
 # === FILTERS ===
 def is_owner_occupied(property_address, mailing_address):
@@ -102,10 +135,6 @@ def is_owner_occupied(property_address, mailing_address):
         return False
     except:
         return False
-
-def is_valid_business(business_type):
-    valid_types = ["Retail", "Office", "Restaurant", "Manufacturing", "Services"]
-    return str(business_type).strip() in valid_types
 
 # === ADD LETTER TO DOC ===
 def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line, signature_name, signature_title, signature_image, signature_email):
@@ -275,6 +304,7 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
     envelopes_doc = Document()
 
     load_zip_lookup()
+    client_list = load_client_list()
 
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Excel file not found: {file_path}")
@@ -286,6 +316,7 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
 
     labels = []
     crm_rows = []
+    is_new_format = 'Executive First Name' in df.columns and 'Executive Last Name' in df.columns
 
     for _, row in df.iterrows():
         try:
@@ -294,26 +325,29 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
                 filter_check = is_owner_occupied(row.get('Address', ''), row.get('Mailing Address', ''))
                 filter_desc = "non-owner-occupied"
             else:  # commercial
-                name_key = 'Business Name'
-                filter_check = is_valid_business(row.get('Business Type', ''))
+                name_key = 'Executive First Name' if is_new_format else 'Business Name'
+                filter_check = is_valid_business(row.get('Business Type', '')) if not is_new_format else True
                 filter_desc = "invalid business type"
 
-            name = str(row.get(name_key, ''))
+            name = clean_name(row, mode)
             if not name:
-                print(f"⏭️ Skipping row with missing {name_key}")
+                print(f"⏭️ Skipping row with missing name")
                 continue
 
             address = str(row.get('Address', '')).title().strip()
-            zip_code = str(row.get('Site Zip Code', '')).strip()
-            mailing_address = str(row.get('Mailing Address', '')).strip()
-            sale_date_raw = str(row.get('Sale Date', '')).strip()
-            sale_price_str = str(row.get('Sale Price', '')).replace('$', '').replace(',', '').strip()
+            zip_code = str(row.get('Site Zip Code' if not is_new_format else 'ZIP Code', '')).strip()
+            mailing_address = str(row.get('Mailing Address' if not is_new_format else 'Address', '')).strip()
+            sale_date_raw = str(row.get('Sale Date', '')).strip() if not is_new_format else "Unknown"
+            sale_price_str = str(row.get('Sale Price', '')).replace('$', '').replace(',', '').strip() if not is_new_format else "0.0"
 
-            if not filter_check:
+            if is_existing_client(name, mailing_address, client_list):
+                print(f"⏭️ Skipping existing client: {name}")
+                continue
+
+            if not filter_check and not is_new_format:
                 print(f"⏭️ Skipping {filter_desc}: {name}")
                 continue
 
-            name = clean_name(name, mode)
             try:
                 sale_price = float(sale_price_str) if sale_price_str else 0.0
             except ValueError:

@@ -31,6 +31,56 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from fuzzywuzzy import fuzz
 import csv
 
+def _get_first_nonempty(row, columns, default=""):
+    """Return the first non-empty value found for the given columns in a row."""
+    for column in columns:
+        if column in row.index:
+            value = row[column]
+            if pd.notna(value):
+                value_str = str(value).strip()
+                if value_str and value_str.lower() != "nan":
+                    return value_str
+    return default
+
+
+def _build_mailing_address(row):
+    """Construct a mailing address string from any available components."""
+    parts = []
+    base_line = _get_first_nonempty(row, [
+        "Mailing Address",
+        "Mailing Address 1",
+        "Mailing Address Line 1",
+    ])
+    if base_line:
+        parts.append(base_line)
+
+    second_line = _get_first_nonempty(row, [
+        "Mailing Address2",
+        "Mailing Address 2",
+        "Mailing Address Line 2",
+    ])
+    if second_line:
+        parts.append(second_line)
+
+    city = _get_first_nonempty(row, ["Mailing City", "City"])
+    state = _get_first_nonempty(row, ["Mailing State", "State"])
+    zip_code = _get_first_nonempty(row, [
+        "Mailing Zip",
+        "Mailing ZIP",
+        "Mailing Zip Code",
+        "Zip Code",
+        "Zip",
+    ])
+
+    city_state = ", ".join(part for part in [city, state] if part)
+    city_state_zip = " ".join(part for part in [city_state, zip_code] if part)
+    if city_state_zip:
+        parts.append(city_state_zip)
+
+    if parts:
+        return " | ".join(parts)
+
+    return base_line or ""
 # === CONFIG ===
 ZIP_LOOKUP_FILE = "zip_lookup.csv"
 MASTER_CLIENT_LIST = "master_client_list.xlsx"
@@ -89,7 +139,7 @@ def is_existing_client(name, mailing_address, client_list):
 # === CLEAN NAME ===
 def clean_name(row, mode):
     if mode == "personal":
-        raw_name = str(row.get('Owner Name', ''))
+        raw_name = _get_first_nonempty(row, ['Owner Name', 'Owner'])
         name_parts = [part.strip() for part in raw_name.split('||')]
         last_names = []
         first_names = []
@@ -320,9 +370,11 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
 
     for _, row in df.iterrows():
         try:
+            property_address = _get_first_nonempty(row, ['Address', 'Situs'])
+            mailing_address_value = _build_mailing_address(row)
             if mode == "personal":
                 name_key = 'Owner Name'
-                filter_check = is_owner_occupied(row.get('Address', ''), row.get('Mailing Address', ''))
+                filter_check = is_owner_occupied(property_address, mailing_address_value)
                 filter_desc = "non-owner-occupied"
             else:  # commercial
                 name_key = 'Executive First Name' if is_new_format else 'Business Name'
@@ -334,11 +386,12 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
                 print(f"⏭️ Skipping row with missing name")
                 continue
 
-            address = str(row.get('Address', '')).title().strip()
-            zip_code = str(row.get('Site Zip Code' if not is_new_format else 'ZIP Code', '')).strip()
-            mailing_address = str(row.get('Mailing Address' if not is_new_format else 'Address', '')).strip()
-            sale_date_raw = str(row.get('Sale Date', '')).strip() if not is_new_format else "Unknown"
-            sale_price_str = str(row.get('Sale Price', '')).replace('$', '').replace(',', '').strip() if not is_new_format else "0.0"
+            address = _get_first_nonempty(row, ['Address', 'Situs']).title().strip()
+            zip_code = _get_first_nonempty(row, ['Site Zip Code', 'Property Zip', 'Zip Code', 'Zip'])
+            mailing_address = mailing_address_value if mode == "personal" else _get_first_nonempty(row, ['Address'])
+            sale_date_raw = _get_first_nonempty(row, ['Sale Date']) if not is_new_format else "Unknown"
+            sale_price_str = _get_first_nonempty(row, ['Sale Price']) if not is_new_format else "0.0"
+            sale_price_str = sale_price_str.replace('$', '').replace(',', '') if sale_price_str else ''
 
             if is_existing_client(name, mailing_address, client_list):
                 print(f"⏭️ Skipping existing client: {name}")

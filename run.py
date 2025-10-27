@@ -142,7 +142,7 @@ signature_profiles = {
     "Brian Jones": ("Brian Jones", "Vice President", "signature_brian.png", "Brian@jonesia.com"),
     "Robert Jones": ("Robert Jones", "President", "signature_bob.png", "bob@jonesia.com"),
     "Kyle Padilla": ("Jane Doe", "Insurance Agent", "signature_kyle.png", "kyle@jonesia.com"),
-    "Julie Siano": ("Julie Siano", "Julie Siano", "signature_jane.png", "Jane@jonesia.com"),
+    "Kristofer Siggins": ("Kristofer Siggins", "Kristofer Siggins", "signature_jane.png", "Kris@jonesia.com"),
 }
 
 INDIAN_RIVER_PERSONAL_TEMPLATE = dedent(
@@ -177,15 +177,15 @@ Best Regards,
 
 ST_LUCIE_PERSONAL_TEMPLATE = dedent(
     """
-Homeowners across St. Lucie County are finally seeing rates ease — and the savings could be substantial.
+For the first time in years, homeowners rates are coming down — and the savings could be significant.
 
-New legislation has encouraged fresh competition in Florida’s insurance market, and families in Port St. Lucie and Fort Pierce are beginning to feel the difference.
+Recent legislative changes have boosted competition in Florida’s property insurance market, and many St. Lucie County homeowners are already benefiting.
 
-Jones Insurance Advisors is a second-generation, family-owned independent agency serving the Treasure Coast. Our local team understands the coverage challenges unique to St. Lucie County and is ready to help you secure the most comprehensive and competitively priced policies available.
+Jones Insurance Advisors is a two-generation, family-owned independent agency located right here on the Treasure Coast. Our team of dedicated agents possess extensive knowledge of the intricacies of the local insurance market, and are excited to assist you in finding the most comprehensive and competitively priced insurance solutions.
 
-Give us a call for a complimentary, no-obligation quote, or submit a request on our website and a dedicated agent will reach out right away!
+Call us today for a free, no-obligation quote, or visit our website below and complete a quote request, and one of our dedicated agents will reach out to you!
 
-We’re committed to earning your trust and delivering the attentive, hometown service you deserve.
+We look forward to earning your business and providing you the personal, dedicated service you have come to expect by doing business locally.
 
 Warm Regards,
 """

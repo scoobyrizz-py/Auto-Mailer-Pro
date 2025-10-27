@@ -13,6 +13,7 @@ a = Analysis(
         ('signature_kyle.png', '.'),
         ('signature_julie.png', '.'),
         ('zip_lookup.csv', '.'),
+        ('master_client_list.xlsx', '.'),
     ],
     hiddenimports=['AutoMailerPro_v5_1', 'pandas', 'docx', 'fuzzywuzzy', 'Levenshtein', 'tkinter', 'ttkthemes'],
     hookspath=[],

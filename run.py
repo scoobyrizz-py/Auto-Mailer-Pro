@@ -5,6 +5,7 @@ import threading
 import AutoMailerPro_v5_1
 import os
 import sys
+from textwrap import dedent
 
 class StdoutRedirector:
     def __init__(self, text_widget):
@@ -22,14 +23,18 @@ def run_campaign():
     global selected_mode, sales_file_path, letter_content, subject_line, signature_name, signature_title, signature_image, signature_email
     selected_mode = mode_var.get()
     sales_file_path = file_entry.get()
-    letter_content = letter_text.get("1.0", tk.END).strip() if not use_default_var.get() else None
+    selected_template = template_var.get()
+    if selected_template == "Custom":
+        letter_content = letter_text.get("1.0", tk.END).strip()
+        if not letter_content:
+            messagebox.showerror("Error", "Please enter letter content for the custom template!")
+            return
+    else:
+        letter_content = LETTER_TEMPLATES[selected_template][selected_mode]
     subject_line = subject_entry.get().strip()
     signature_name, signature_title, signature_image, signature_email = signature_profiles[signature_var.get()]
     if not sales_file_path:
         messagebox.showerror("Error", "Please select a sales data file!")
-        return
-    if not use_default_var.get() and not letter_content:
-        messagebox.showerror("Error", "Please enter letter content or select default template!")
         return
     if not subject_line:
         messagebox.showerror("Error", "Please enter a subject line!")
@@ -74,9 +79,35 @@ def update_subject_line(*args):
             subject_entry.insert(0, "Homeowners Insurance Rates Are Finally on the Decline – Don’t Miss Out!")
         else:
             subject_entry.insert(0, "Protect Your Business with Tailored Insurance Solutions!")
+    if template_var.get() != "Custom":
+        apply_template_selection()
 
 def mark_subject_edited(event):
     user_edited_subject.set(True)
+
+def apply_template_selection(*args):
+    global custom_content_cache, current_template_selection
+    new_selection = template_var.get()
+    mode = mode_var.get()
+
+    if current_template_selection == "Custom" and new_selection != "Custom":
+        custom_content_cache = letter_text.get("1.0", tk.END).strip()
+
+    if new_selection == "Custom":
+        letter_text.config(state='normal')
+        if current_template_selection != "Custom":
+            letter_text.delete("1.0", tk.END)
+            if custom_content_cache:
+                letter_text.insert(tk.END, custom_content_cache)
+        current_template_selection = new_selection
+        return
+
+    template_content = LETTER_TEMPLATES[new_selection][mode]
+    letter_text.config(state='normal')
+    letter_text.delete("1.0", tk.END)
+    letter_text.insert(tk.END, template_content)
+    letter_text.config(state='disabled')
+    current_template_selection = new_selection
 
 # Initialize window with theme
 root = ThemedTk(theme="arc")
@@ -114,6 +145,82 @@ signature_profiles = {
     "Julie Siano": ("Julie Siano", "Julie Siano", "signature_jane.png", "Jane@jonesia.com"),
 }
 
+INDIAN_RIVER_PERSONAL_TEMPLATE = dedent(
+    """
+For the first time in years, homeowners rates are coming down — and the savings could be significant.
+
+Recent legislative changes have boosted competition in Florida’s property insurance market, and many Indian River County homeowners are already benefiting.
+
+Jones Insurance Advisors is a two-generation, family-owned independent agency located right here in Vero Beach. Our team of dedicated agents possess extensive knowledge of the intricacies of the local insurance market, and are excited to assist you in finding the most comprehensive and competitively priced insurance solutions.
+
+Call us today for a free, no-obligation quote, or visit our website below and complete a quote request, and one of our dedicated agents will reach out to you!
+
+We look forward to earning your business and providing you the personal, dedicated service you have come to expect by doing business locally.
+
+Warm Regards,
+"""
+).strip()
+
+INDIAN_RIVER_COMMERCIAL_TEMPLATE = dedent(
+    """
+Protecting your business is our priority at Jones Insurance Advisors.
+
+As an Indian River County business, you need insurance solutions tailored to your unique needs. Our experienced team specializes in crafting comprehensive coverage plans for businesses like yours, ensuring protection against risks while keeping costs competitive.
+
+Jones Insurance Advisors, a family-owned agency in Vero Beach, is here to help. Contact us for a free consultation to discuss how we can safeguard your business.
+
+We look forward to partnering with you!
+
+Best Regards,
+"""
+).strip()
+
+ST_LUCIE_PERSONAL_TEMPLATE = dedent(
+    """
+Homeowners across St. Lucie County are finally seeing rates ease — and the savings could be substantial.
+
+New legislation has encouraged fresh competition in Florida’s insurance market, and families in Port St. Lucie and Fort Pierce are beginning to feel the difference.
+
+Jones Insurance Advisors is a second-generation, family-owned independent agency serving the Treasure Coast. Our local team understands the coverage challenges unique to St. Lucie County and is ready to help you secure the most comprehensive and competitively priced policies available.
+
+Give us a call for a complimentary, no-obligation quote, or submit a request on our website and a dedicated agent will reach out right away!
+
+We’re committed to earning your trust and delivering the attentive, hometown service you deserve.
+
+Warm Regards,
+"""
+).strip()
+
+ST_LUCIE_COMMERCIAL_TEMPLATE = dedent(
+    """
+Jones Insurance Advisors is focused on protecting St. Lucie County businesses like yours.
+
+Whether you’re operating in Port St. Lucie, Fort Pierce, or along the coast, you need insurance solutions built around the unique exposures your company faces.
+
+Our experienced advisors craft comprehensive coverage portfolios that balance protection and cost, so you can stay focused on growing your business.
+
+As a family-owned independent agency serving the entire Treasure Coast, we’re ready to connect and explore how we can safeguard your operations.
+
+We look forward to partnering with you!
+
+Best Regards,
+"""
+).strip()
+
+LETTER_TEMPLATES = {
+    "Indian River County": {
+        "personal": INDIAN_RIVER_PERSONAL_TEMPLATE,
+        "commercial": INDIAN_RIVER_COMMERCIAL_TEMPLATE,
+    },
+    "St. Lucie County": {
+        "personal": ST_LUCIE_PERSONAL_TEMPLATE,
+        "commercial": ST_LUCIE_COMMERCIAL_TEMPLATE,
+    },
+}
+
+custom_content_cache = ""
+current_template_selection = None
+
 # Signature selection
 signature_label = tk.Label(main_frame, text="Signature:", font=("Arial", 12), bg="#f0f4f8")
 signature_label.grid(row=1, column=0, sticky=tk.W, pady=5)
@@ -125,6 +232,7 @@ signature_dropdown.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), pady
 mode_label = tk.Label(main_frame, text="Select Mode:", font=("Arial", 12), bg="#f0f4f8")
 mode_label.grid(row=2, column=0, sticky=tk.W, pady=5)
 mode_var = tk.StringVar(value="personal")
+template_var = tk.StringVar(value="Indian River County")
 user_edited_subject = tk.BooleanVar(value=False)
 mode_var.trace("w", update_subject_line)
 ttk.Radiobutton(main_frame, text="Personal Lines", variable=mode_var, value="personal").grid(row=2, column=1, sticky=tk.W)
@@ -137,24 +245,32 @@ file_entry = ttk.Entry(main_frame, width=50, font=("Arial", 10))
 file_entry.grid(row=3, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 ttk.Button(main_frame, text="Browse", command=browse_file, style="TButton").grid(row=3, column=3, padx=5)
 
+# Template selection
+template_label = tk.Label(main_frame, text="Letter Template:", font=("Arial", 12), bg="#f0f4f8")
+template_label.grid(row=4, column=0, sticky=tk.W, pady=5)
+template_dropdown = ttk.Combobox(
+    main_frame,
+    textvariable=template_var,
+    values=list(LETTER_TEMPLATES.keys()) + ["Custom"],
+    state="readonly"
+)
+template_dropdown.grid(row=4, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
 # Subject line
 subject_label = tk.Label(main_frame, text="Subject Line:", font=("Arial", 12), bg="#f0f4f8")
-subject_label.grid(row=4, column=0, sticky=tk.W, pady=5)
+subject_label.grid(row=5, column=0, sticky=tk.W, pady=5)
 subject_entry = ttk.Entry(main_frame, width=50, font=("Arial", 10))
-subject_entry.grid(row=4, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+subject_entry.grid(row=5, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
 subject_entry.insert(0, "Homeowners Insurance Rates Are Finally on the Decline – Don’t Miss Out!")
 subject_entry.bind("<KeyRelease>", mark_subject_edited)
 
-# Default template checkbox
-use_default_var = tk.BooleanVar(value=True)
-default_check = ttk.Checkbutton(main_frame, text="Use Default Template", variable=use_default_var)
-default_check.grid(row=5, column=0, columnspan=2, sticky=tk.W, pady=5)
-
 # Letter content
-content_label = tk.Label(main_frame, text="Letter Content (leave blank if using default):", font=("Arial", 12), bg="#f0f4f8")
+content_label = tk.Label(main_frame, text="Letter Content (editable when using the custom template):", font=("Arial", 12), bg="#f0f4f8")
 content_label.grid(row=6, column=0, sticky=tk.W, pady=5)
 letter_text = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("Arial", 10), bg="white", fg="black")
 letter_text.grid(row=7, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+template_var.trace_add("write", lambda *args: apply_template_selection())
+apply_template_selection()
 
 # Run button
 run_button = ttk.Button(main_frame, text="Run Campaign", command=run_campaign, style="TButton")
@@ -187,4 +303,5 @@ root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)
 main_frame.columnconfigure(1, weight=1)
 
-root.mainloop()
+if __name__ == "__main__":
+    root.mainloop()

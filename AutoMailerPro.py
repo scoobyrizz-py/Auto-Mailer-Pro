@@ -47,13 +47,22 @@ def _get_first_nonempty(row, columns, default=""):
 def _build_mailing_address(row):
     """Construct a mailing address string from any available components."""
     parts = []
-    base_line = _get_first_nonempty(row, [
+    line_one = _get_first_nonempty(row, [
         "Mailing Address",
+                "Mailing Address Line 1",
+        "Mailing Address 1",
+        "Address",
+    ])
+    if line_one:
+        parts.append(line_one)
+
+    line_two = _get_first_nonempty(row, [
         "Mailing Address 2",
         "Mailing Address Line 2",
+        "Address Line 2",
     ])
-    if second_line:
-        parts.append(second_line)
+    if line_two:
+        parts.append(line_two)
 
     city = _get_first_nonempty(row, ["Mailing City", "City"])
     state = _get_first_nonempty(row, ["Mailing State", "State"])
@@ -70,13 +79,14 @@ def _build_mailing_address(row):
     if city_state_zip:
         parts.append(city_state_zip)
 
-    if parts:
-        return " | ".join(parts)
+        return " | ".join(parts) if parts else ""
 
-    return base_line or ""
 # === PATH CONFIGURATION ===
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+ASSETS_DIR = BASE_DIR / "assets"
+SIGNATURES_DIR = ASSETS_DIR / "signatures"
+OUTPUT_ROOT = BASE_DIR / "output"
 
 ZIP_LOOKUP_FILE = DATA_DIR / "zip_lookup.csv"
 MASTER_CLIENT_LIST = DATA_DIR / "master_client_list.xlsx"
@@ -355,7 +365,7 @@ def main(
     subject_line="",
     signature_name="Brian Jones",
     signature_title="Vice President",
-    signature_image= SIGNATURES_DIR / "signature_brian.png",
+    signature_image=SIGNATURES_DIR / "signature_brian.png",
     signature_email="Brian@jonesia.com",
 ):
     if mode not in ["personal", "commercial"]:

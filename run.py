@@ -1,12 +1,24 @@
 from pathlib import Path
-from ttkthemes import ThemedTk
+import sys
+import threading
+
+
+import AutoMailerPro
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
-import threading
-import AutoMailerPro
-
-import sys
+from ttkthemes import ThemedTk
 from textwrap import dedent
+
+def get_base_dir() -> Path:
+    """Return the directory that holds bundled resources."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = get_base_dir()
+ASSETS_DIR = BASE_DIR / "assets"
+SIGNATURES_DIR = ASSETS_DIR / "signatures"
 
 class StdoutRedirector:
     def __init__(self, text_widget):
@@ -126,14 +138,10 @@ style.configure("Main.TFrame", background="#f0f4f8")
 style.configure("TButton", font=("Arial", 12), padding=10)
 
 # Add logo
-BASE_DIR = Path(__file__).resolve().parent
-ASSETS_DIR = BASE_DIR / "assets"
-SIGNATURES_DIR = ASSETS_DIR / "signatures"
 
 logo_path = ASSETS_DIR / "logo.png"
 if logo_path.exists():
     logo_image = tk.PhotoImage(file=str(logo_path))
-    logo_image = tk.PhotoImage(file=logo_path)
     logo_image = logo_image.subsample(2, 2)
     logo_label = tk.Label(main_frame, image=logo_image, bg="#f0f4f8")
     logo_label.image = logo_image

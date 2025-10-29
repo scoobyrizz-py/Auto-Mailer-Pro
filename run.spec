@@ -1,4 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
+
 from pathlib import Path
 
 block_cipher = None
@@ -6,13 +7,14 @@ block_cipher = None
 BASE_DIR = Path(__file__).parent.resolve()
 
 datas = [
-    (BASE_DIR / 'assets' / 'logo.png', 'assets'),
-    (BASE_DIR / 'data' / 'zip_lookup.csv', 'data'),
-    (BASE_DIR / 'data' / 'master_client_list.xlsx', 'data'),
+    (str(BASE_DIR / 'assets' / 'logo.png'), 'assets'),
+    (str(BASE_DIR / 'assets' / 'logo.ico'), 'assets'),
+    (str(BASE_DIR / 'data' / 'zip_lookup.csv'), 'data'),
+    (str(BASE_DIR / 'data' / 'master_client_list.xlsx'), 'data'),
 ]
 
 for signature in (BASE_DIR / 'assets' / 'signatures').glob('*.png'):
-    datas.append((signature, 'assets/signatures'))
+    datas.append((str(signature), 'assets/signatures'))
 a = Analysis(
     ['run.py'],
     pathex=[str(BASE_DIR)],
@@ -47,5 +49,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='logo.ico',  # Remove if logo.ico doesn't exist
+    icon=str(BASE_DIR / 'assets' / 'logo.ico'),
 )

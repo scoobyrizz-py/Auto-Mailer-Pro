@@ -24,13 +24,18 @@ __contact__ = "scooby_rizz@proton.me"
 
 import os
 import re
-from pathlib import Path
-import pandas as pd
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import pandas as pd
+
 from docx import Document
-from docx.shared import Inches, Pt
+
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+from docx.shared import Inches, Pt
 from fuzzywuzzy import fuzz
+
 import csv
 
 def _get_first_nonempty(row, columns, default=""):
@@ -204,15 +209,27 @@ def _build_mailing_address(row):
         return " | ".join(parts) if parts else ""
 
 # === PATH CONFIGURATION ===
-BASE_DIR = Path(__file__).resolve().parent
+
+
+
+def get_resource_dir() -> Path:
+    """Return the folder that contains bundled assets and data files."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent
+
+
+BASE_DIR = get_resource_dir()
 DATA_DIR = BASE_DIR / "data"
 ASSETS_DIR = BASE_DIR / "assets"
 SIGNATURES_DIR = ASSETS_DIR / "signatures"
-OUTPUT_ROOT = BASE_DIR / "output"
+OUTPUT_ROOT = Path.cwd() / "output"
 
 ZIP_LOOKUP_FILE = DATA_DIR / "zip_lookup.csv"
 MASTER_CLIENT_LIST = DATA_DIR / "master_client_list.xlsx"
-LOGO_PATH = BASE_DIR / "Logo.png"
+LOGO_PATH = ASSETS_DIR / "logo.png"
+if not LOGO_PATH.exists():
+    LOGO_PATH = BASE_DIR / "Logo.png"
 
 YOUR_CO = "Jones Insurance Advisors, Inc"
 YOUR_PHONE = "(772) 569-6802"

@@ -147,6 +147,24 @@ def _clean_name_tokens(name):
     return _strip_affixes(tokens)
 
 
+def _format_given_names(tokens):
+    """Format given-name tokens as ``First M.`` style."""
+    if not tokens:
+        return ""
+
+    first_name = tokens[0].title()
+    middle_initials = []
+    for token in tokens[1:]:
+        normalized = _normalize_name_token(token)
+        if not normalized:
+            continue
+        middle_initials.append(f"{normalized[0].upper()}.")
+
+    if middle_initials:
+        return f"{first_name} {' '.join(middle_initials)}"
+    return first_name
+
+
 
 def _build_mailing_address(row):
     """Construct a mailing address string from any available components."""
@@ -258,11 +276,11 @@ def clean_name(row, mode):
             words = _clean_name_tokens(name_no_suffix)
             if len(words) >= 2:
                 last_names.append(words[0].title())
-                first_name = " ".join(words[1:]).title()
+                first_name = _format_given_names(words[1:])
                 first_names.append(first_name)
             elif len(words) == 1:
                 last_names.append("")
-                first_names.append(words[0].title())
+                ffirst_names.append(_format_given_names([words[0]]))
             else:
                 last_names.append("")
                 first_names.append("")
@@ -281,7 +299,7 @@ def clean_name(row, mode):
         last_name = str(row.get('Executive Last Name', '')).strip()
         first_tokens = _clean_name_tokens(first_name)
         last_tokens = _clean_name_tokens(last_name)
-        cleaned_first_name = " ".join(token.title() for token in first_tokens)
+        cleaned_first_name = _format_given_names(first_tokens)
         cleaned_last_name = " ".join(token.title() for token in last_tokens)
         if cleaned_first_name and cleaned_last_name:
             return f"{cleaned_first_name} {cleaned_last_name}".strip()

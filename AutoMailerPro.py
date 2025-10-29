@@ -23,6 +23,7 @@ __company__ = "Jones Insurance Advisors, Inc."
 __contact__ = "scooby_rizz@proton.me"
 
 import os
+import re
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
@@ -42,6 +43,109 @@ def _get_first_nonempty(row, columns, default=""):
                 if value_str and value_str.lower() != "nan":
                     return value_str
     return default
+IGNORABLE_NAME_PREFIXES = {
+    "mr",
+    "mrs",
+    "ms",
+    "miss",
+    "dr",
+    "rev",
+    "hon",
+    "attn",
+}
+
+IGNORABLE_NAME_SUFFIXES = {
+    "jr",
+    "junior",
+    "sr",
+    "senior",
+    "esq",
+    "esquire",
+    "jd",
+    "md",
+    "phd",
+    "law",
+}
+
+ORDINAL_WORDS = {
+    "first",
+    "second",
+    "third",
+    "fourth",
+    "fifth",
+    "sixth",
+    "seventh",
+    "eighth",
+    "ninth",
+    "tenth",
+    "1st",
+    "2nd",
+    "3rd",
+    "4th",
+    "5th",
+    "6th",
+    "7th",
+    "8th",
+    "9th",
+    "10th",
+}
+
+ROMAN_NUMERAL_SUFFIXES = {
+    "i",
+    "ii",
+    "iii",
+    "iv",
+    "v",
+    "vi",
+    "vii",
+    "viii",
+    "ix",
+    "x",
+}
+
+
+def _normalize_name_token(token):
+    """Return a simplified representation of a name token for comparisons."""
+    return re.sub(r"[^a-z0-9]", "", token.lower())
+
+
+def _strip_affixes(tokens):
+    """Remove known prefixes/suffixes/ordinals from a list of name tokens."""
+    filtered = []
+    idx = 0
+    while idx < len(tokens):
+        token = tokens[idx]
+        normalized = _normalize_name_token(token)
+        if not normalized:
+            idx += 1
+            continue
+
+        if normalized in IGNORABLE_NAME_PREFIXES:
+            idx += 1
+            continue
+
+        if normalized in IGNORABLE_NAME_SUFFIXES or normalized in ROMAN_NUMERAL_SUFFIXES:
+            idx += 1
+            continue
+
+        if normalized == "the" and idx + 1 < len(tokens):
+            next_normalized = _normalize_name_token(tokens[idx + 1])
+            if next_normalized in ORDINAL_WORDS or next_normalized in ROMAN_NUMERAL_SUFFIXES:
+                idx += 2
+                continue
+
+        filtered.append(token)
+        idx += 1
+
+    return filtered
+
+
+def _clean_name_tokens(name):
+    if not name:
+        return []
+    tokens = str(name).replace(",", " ").split()
+    return _strip_affixes(tokens)
+
 
 
 def _build_mailing_address(row):
@@ -151,10 +255,11 @@ def clean_name(row, mode):
         first_names = []
         for part in name_parts:
             name_no_suffix = part.split('(')[0].strip()
-            words = name_no_suffix.split()
+            words = _clean_name_tokens(name_no_suffix)
             if len(words) >= 2:
                 last_names.append(words[0].title())
-                first_names.append(words[1].title())
+                first_name = " ".join(words[1:]).title()
+                first_names.append(first_name)
             elif len(words) == 1:
                 last_names.append("")
                 first_names.append(words[0].title())
@@ -174,8 +279,12 @@ def clean_name(row, mode):
     else:  # commercial
         first_name = str(row.get('Executive First Name', '')).strip()
         last_name = str(row.get('Executive Last Name', '')).strip()
-        if first_name and last_name:
-            return f"{first_name.title()} {last_name.title()}"
+        first_tokens = _clean_name_tokens(first_name)
+        last_tokens = _clean_name_tokens(last_name)
+        cleaned_first_name = " ".join(token.title() for token in first_tokens)
+        cleaned_last_name = " ".join(token.title() for token in last_tokens)
+        if cleaned_first_name and cleaned_last_name:
+            return f"{cleaned_first_name} {cleaned_last_name}".strip()
         legal_name = str(row.get('Legal Name', '')).strip()
         company_name = str(row.get('Company Name', '')).strip()
         return legal_name.title() or company_name.title() or "Valued Business"

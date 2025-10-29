@@ -10,7 +10,7 @@ Description:
     and mailing labels for owner-occupied properties (personal) or businesses (commercial).
 
 Usage:
-    python AutoMailerPro_v5_1.py
+    python AutoMailerPro.py
     OR called from GUI with mode, file_path, content, subject_line, signature_name, signature_title, signature_image, and signature_email parameters.
 
 Requirements:
@@ -23,6 +23,7 @@ __company__ = "Jones Insurance Advisors, Inc."
 __contact__ = "scooby_rizz@proton.me"
 
 import os
+from pathlib import Path
 import pandas as pd
 from datetime import datetime
 from docx import Document
@@ -48,14 +49,6 @@ def _build_mailing_address(row):
     parts = []
     base_line = _get_first_nonempty(row, [
         "Mailing Address",
-        "Mailing Address 1",
-        "Mailing Address Line 1",
-    ])
-    if base_line:
-        parts.append(base_line)
-
-    second_line = _get_first_nonempty(row, [
-        "Mailing Address2",
         "Mailing Address 2",
         "Mailing Address Line 2",
     ])
@@ -81,10 +74,13 @@ def _build_mailing_address(row):
         return " | ".join(parts)
 
     return base_line or ""
-# === CONFIG ===
-ZIP_LOOKUP_FILE = "zip_lookup.csv"
-MASTER_CLIENT_LIST = "master_client_list.xlsx"
-LOGO_PATH = "logo.png"
+# === PATH CONFIGURATION ===
+BASE_DIR = Path(__file__).resolve().parent
+DATA_DIR = BASE_DIR / "data"
+
+ZIP_LOOKUP_FILE = DATA_DIR / "zip_lookup.csv"
+MASTER_CLIENT_LIST = DATA_DIR / "master_client_list.xlsx"
+LOGO_PATH = BASE_DIR / "Logo.png"
 
 YOUR_CO = "Jones Insurance Advisors, Inc"
 YOUR_PHONE = "(772) 569-6802"
@@ -96,7 +92,7 @@ zip_city_state = {}
 
 def load_zip_lookup():
     global zip_city_state
-    if not os.path.exists(ZIP_LOOKUP_FILE):
+    if not ZIP_LOOKUP_FILE.exists():
         print(f"❌ Missing ZIP lookup file: {ZIP_LOOKUP_FILE}")
         return
     df = pd.read_csv(ZIP_LOOKUP_FILE, dtype=str)
@@ -112,7 +108,7 @@ def zip_to_city_state(zip_code):
 
 # === LOAD CLIENT LIST FOR SCRUBBING ===
 def load_client_list():
-    if not os.path.exists(MASTER_CLIENT_LIST):
+    if not MASTER_CLIENT_LIST.exists():
         print(f"❌ Master client list not found: {MASTER_CLIENT_LIST}")
         return []
     try:
@@ -186,6 +182,55 @@ def is_owner_occupied(property_address, mailing_address):
     except:
         return False
 
+# === BUSINESS TYPE VALIDATION ===
+def is_valid_business(business_type):
+    """Return True if the business type represents a qualified commercial lead."""
+    if business_type is None:
+        return False
+
+    business_type = str(business_type).strip().lower()
+    if not business_type:
+        return False
+
+    disqualifying_keywords = {
+        "church",
+        "religious",
+        "synagogue",
+        "temple",
+        "mosque",
+        "school",
+        "college",
+        "university",
+        "government",
+        "county",
+        "city",
+        "state",
+        "federal",
+        "municipal",
+        "public",
+        "utility",
+        "hoa",
+        "homeowners association",
+        "condominium",
+        "condo",
+        "apartments",
+        "apartment",
+        "association",
+        "non-profit",
+        "nonprofit",
+        "charity",
+        "vacant",
+        "land",
+        "empty lot",
+        "lot",
+    }
+
+    for keyword in disqualifying_keywords:
+        if keyword in business_type:
+            return False
+
+    return True
+
 # === ADD LETTER TO DOC ===
 def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line, signature_name, signature_title, signature_image, signature_email):
     today = datetime.now().strftime('%B %d, %Y')
@@ -213,8 +258,9 @@ def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, conte
 
     doc.add_paragraph(personalized_content)
 
-    if os.path.exists(signature_image):
-        doc.add_picture(signature_image, width=Inches(1.5), height=Inches(0.5))
+    signature_image_path = os.fspath(signature_image) if signature_image else None
+    if signature_image_path and os.path.exists(signature_image_path):
+        doc.add_picture(signature_image_path, width=Inches(1.5), height=Inches(0.5))
     else:
         print(f"❌ Signature image not found: {signature_image}")
 
@@ -255,6 +301,7 @@ def add_envelope_to_doc(doc, name, address, zip_code, signature_name):
 
 # === CREATE LABELS DOC ===
 def create_labels(label_data, labels_file):
+    labels_file = Path(labels_file)
     doc = Document()
     section = doc.sections[0]
     section.page_width = Inches(8.5)
@@ -297,13 +344,20 @@ def create_labels(label_data, labels_file):
             else:
                 cell.text = ""
 
-    doc.save(labels_file)
+    doc.save(str(labels_file))
     print(f"✅ Mailing labels saved to: {labels_file}")
 
 # === MAIN ===
-def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_line="", 
-         signature_name="Brian Jones", signature_title="Vice President", 
-         signature_image="signature_brian.png", signature_email="Brian@jonesia.com"):
+def main(
+    mode="personal",
+    file_path=DATA_DIR / "sales_data.xlsx",
+    content=None,
+    subject_line="",
+    signature_name="Brian Jones",
+    signature_title="Vice President",
+    signature_image= SIGNATURES_DIR / "signature_brian.png",
+    signature_email="Brian@jonesia.com",
+):
     if mode not in ["personal", "commercial"]:
         raise ValueError("Mode must be 'personal' or 'commercial'")
     if not subject_line:
@@ -340,14 +394,16 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
             )
 
     timestamp = datetime.now().strftime("%m%d%y_%H%M%S")
-    OUTPUT_DIR = f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
-    LETTERS_FILE = os.path.join(OUTPUT_DIR, "all_letters.docx")
-    ENVELOPES_FILE = os.path.join(OUTPUT_DIR, "all_envelopes.docx")
-    LABELS_FILE = os.path.join(OUTPUT_DIR, "mailing_labels.docx")
-    CRM_EXPORT_FILE = os.path.join(OUTPUT_DIR, f"crm_{mode}_occupied.csv")
+    OUTPUT_ROOT.mkdir(exist_ok=True)
+    OUTPUT_DIR = OUTPUT_ROOT / f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
+    LETTERS_FILE = OUTPUT_DIR / "all_letters.docx"
+    ENVELOPES_FILE = OUTPUT_DIR / "all_envelopes.docx"
+    LABELS_FILE = OUTPUT_DIR / "mailing_labels.docx"
+    CRM_EXPORT_FILE = OUTPUT_DIR / f"crm_{mode}_occupied.csv"
 
-    if not os.path.exists(OUTPUT_DIR):
-        os.makedirs(OUTPUT_DIR)
+    created_output_dir = not OUTPUT_DIR.exists()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if created_output_dir:
         print(f"📁 Created output folder: {OUTPUT_DIR}")
 
     letters_doc = Document()
@@ -356,8 +412,15 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
     load_zip_lookup()
     client_list = load_client_list()
 
-    if not os.path.exists(file_path):
+    file_path = Path(file_path)
+    if not file_path.exists():
         raise FileNotFoundError(f"Excel file not found: {file_path}")
+
+    signature_image = Path(signature_image)
+    if not signature_image.exists() and not signature_image.is_absolute():
+        candidate = SIGNATURES_DIR / signature_image.name
+        if candidate.exists():
+            signature_image = candidate
 
     try:
         df = pd.read_excel(file_path)
@@ -443,8 +506,8 @@ def main(mode="personal", file_path="sales_data.xlsx", content=None, subject_lin
             dict_writer.writerows(crm_rows)
         print(f"📥 CRM-ready CSV saved to: {CRM_EXPORT_FILE}")
 
-    letters_doc.save(LETTERS_FILE)
-    envelopes_doc.save(ENVELOPES_FILE)
+    letters_doc.save(str(LETTERS_FILE))
+    envelopes_doc.save(str(ENVELOPES_FILE))
     print(f"📄 All letters saved to: {LETTERS_FILE}")
     print(f"✉️ All envelopes saved to: {ENVELOPES_FILE}")
 

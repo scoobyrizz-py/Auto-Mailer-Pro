@@ -180,6 +180,16 @@ def clean_name(row, mode):
         company_name = str(row.get('Company Name', '')).strip()
         return legal_name.title() or company_name.title() or "Valued Business"
 
+def _has_minimum_name_parts(name, min_parts=2):
+    """Return True if the cleaned name contains at least ``min_parts`` distinct words."""
+    if not name:
+        return False
+
+    word_count = sum(
+        1 for word in name.replace('&', ' ').split() if any(char.isalpha() for char in word)
+    )
+    return word_count >= min_parts
+
 # === FILTERS ===
 def is_owner_occupied(property_address, mailing_address):
     try:
@@ -457,6 +467,9 @@ def main(
             name = clean_name(row, mode)
             if not name:
                 print(f"⏭️ Skipping row with missing name")
+                continue
+            if not _has_minimum_name_parts(name):
+                print(f"⏭️ Skipping insufficient name parts: {name}")
                 continue
 
             address = _get_first_nonempty(row, ['Address', 'Situs']).title().strip()

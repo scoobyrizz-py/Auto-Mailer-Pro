@@ -1,9 +1,10 @@
+from pathlib import Path
 from ttkthemes import ThemedTk
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 import threading
-import AutoMailerPro_v5_1
-import os
+import AutoMailerPro
+
 import sys
 from textwrap import dedent
 
@@ -56,7 +57,7 @@ def threaded_main():
         run_button.config(state='normal')
 
     try:
-        AutoMailerPro_v5_1.main(
+        AutoMailerPro.main(
             selected_mode, sales_file_path, letter_content, subject_line,
             signature_name=signature_name, signature_title=signature_title,
             signature_image=signature_image, signature_email=signature_email
@@ -125,8 +126,13 @@ style.configure("Main.TFrame", background="#f0f4f8")
 style.configure("TButton", font=("Arial", 12), padding=10)
 
 # Add logo
-logo_path = os.path.join("logo.png")
-if os.path.exists(logo_path):
+BASE_DIR = Path(__file__).resolve().parent
+ASSETS_DIR = BASE_DIR / "assets"
+SIGNATURES_DIR = ASSETS_DIR / "signatures"
+
+logo_path = ASSETS_DIR / "logo.png"
+if logo_path.exists():
+    logo_image = tk.PhotoImage(file=str(logo_path))
     logo_image = tk.PhotoImage(file=logo_path)
     logo_image = logo_image.subsample(2, 2)
     logo_label = tk.Label(main_frame, image=logo_image, bg="#f0f4f8")
@@ -139,10 +145,30 @@ else:
 
 # Define signature profiles (name, title, image, email)
 signature_profiles = {
-    "Brian Jones": ("Brian Jones", "Vice President", "signature_brian.png", "Brian@jonesia.com"),
-    "Robert Jones": ("Robert Jones", "President", "signature_bob.png", "bob@jonesia.com"),
-    "Kyle Padilla": ("Jane Doe", "Insurance Agent", "signature_kyle.png", "kyle@jonesia.com"),
-    "Kristofer Siggins": ("Kristofer Siggins", "Kristofer Siggins", "signature_jane.png", "Kris@jonesia.com"),
+"Brian Jones": (
+        "Brian Jones",
+        "Vice President",
+        SIGNATURES_DIR / "signature_brian.png",
+        "Brian@jonesia.com",
+    ),
+    "Robert Jones": (
+        "Robert Jones",
+        "President",
+        SIGNATURES_DIR / "signature_bob.png",
+        "bob@jonesia.com",
+    ),
+    "Kyle Padilla": (
+        "Kyle Padilla",
+        "Insurance Agent",
+        SIGNATURES_DIR / "signature_kyle.png",
+        "kyle@jonesia.com",
+    ),
+    "Kristofer Siggins": (
+        "Kristofer Siggins",
+        "Account Executive",
+        SIGNATURES_DIR / "signature_kris.png",
+        "Kris@jonesia.com",
+    ),
 }
 
 INDIAN_RIVER_PERSONAL_TEMPLATE = dedent(

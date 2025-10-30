@@ -9,7 +9,8 @@
  - **Guided GUI Workflow** – Select your data file, campaign mode, templates, and signature branding from a themed Tkinter interface.
  - **Dynamic Letter Content** – Use default market-ready templates or supply your own subject line and body copy per campaign.
  - **Document Automation** – Produce Microsoft Word documents for letters, #10 envelopes, and Avery 5160 mailing labels in one run.
- - **CRM Export** – Create a cleaned CSV (`crm_<mode>_occupied.csv`) ready for import into your CRM.
+- **CRM Export** – Create a cleaned CSV (`crm_<mode>_occupied.csv`) ready for import into your CRM.
+- **Automated Campaign Log** – Each CRM export is appended to `data/campaign_history.db` for long-term tracking.
  - **Data Hygiene** – Cleans owner names, verifies owner-occupancy, validates business types, maps ZIP codes to city/state, and skips existing clients found in the `master_client_list.xlsx` file.
  
  ---
@@ -19,18 +20,14 @@
  | --- | --- |
  | `run.py` | GUI launcher for Auto Mailer Pro. |
  | `AutoMailerPro.py` | Core campaign generation logic. Can be imported or run via the GUI. |
- | `AutoMailerPro.exe` | Packaged Windows executable of the GUI (no Python installation required). |
--| `assets/`, `logo.ico`, `Logo.png` | Branding assets referenced by the GUI and generated documents. |
--| `signature_*.png` | Signature images selectable within the GUI. |
--| `zip_lookup.csv` | ZIP-to-city/state reference data used during processing. |
--| `master_client_list.xlsx` | Reference list of existing clients to exclude from outreach. |
-+| `assets/` | Branding assets referenced by the GUI and generated documents. |
-+| `assets/signatures/` | Signature images selectable within the GUI. |
-+| `data/zip_lookup.csv` | ZIP-to-city/state reference data used during processing. |
-+| `data/master_client_list.xlsx` | Reference list of existing clients to exclude from outreach. |
-+| `output/` | Auto-created workspace where timestamped campaign folders are stored. |
- | `archive/`, `dist/` | Build artifacts for distributing the Windows executable. |
- 
+| `AutoMailerPro.exe` | Packaged Windows executable of the GUI (no Python installation required). |
+| `assets/` | Branding assets referenced by the GUI and generated documents. |
+| `assets/signatures/` | Signature images selectable within the GUI. |
+| `data/zip_lookup.csv` | ZIP-to-city/state reference data used during processing. |
+| `data/master_client_list.xlsx` | Reference list of existing clients to exclude from outreach. |
+| `data/campaign_history.db` | SQLite database that accumulates every CRM export for dashboarding. |
+| `output/` | Auto-created workspace where timestamped campaign folders are stored. |
+| `archive/`, `dist/` | Build artifacts for distributing the Windows executable. |
  ---
  
  ## ✅ Prerequisites
@@ -55,9 +52,8 @@
  
  ## 🚀 Quick Start
  
- ### Option 1: Launch the Windows executable
--1. Copy `AutoMailerPro.exe`, `Logo.png`, `zip_lookup.csv`, `master_client_list.xlsx`, and signature images into the same folder.
-+1. Copy `AutoMailerPro.exe` along with the `assets/` and `data/` folders into the same directory.
+### Option 1: Launch the Windows executable
+ 1. Copy `AutoMailerPro.exe` along with the `assets/` and `data/` folders into the same directory.
  2. Double-click `AutoMailerPro.exe`.
  3. Follow the on-screen workflow (see [Using the Application](#-using-the-application)).
  
@@ -82,9 +78,7 @@
      subject_line="Custom subject here",
      signature_name="Brian Jones",
      signature_title="Vice President",
--    signature_image="signature_brian.png",
-+    signature_image="assets/signatures/signature_brian.png",
-     signature_email="Brian@jonesia.com",
+     signature_image="assets/signatures/signature_brian.png",
  )
  ```
  
@@ -124,11 +118,9 @@ If you need to refresh the packaged application or customize it with your own as
  | `Business Type` | – | ✅ *(legacy commercial format)* |
  | `Executive First Name` / `Executive Last Name` | – | ✅ *(new commercial format)* |
  
- Additional reference files:
--- **`zip_lookup.csv`** – Maps 5-digit ZIP codes to city/state values written to output documents.
--- **`master_client_list.xlsx`** – Existing client roster. Any record with a matching name and mailing address is automatically skipped.
-+- **`data/zip_lookup.csv`** – Maps 5-digit ZIP codes to city/state values written to output documents.
-+- **`data/master_client_list.xlsx`** – Existing client roster. Any record with a matching name and mailing address is automatically skipped.
+    Additional reference files:
+    - **`data/zip_lookup.csv`** – Maps 5-digit ZIP codes to city/state values written to output documents.
+    - **`data/master_client_list.xlsx`** – Existing client roster. Any record with a matching name and mailing address is automatically skipped.
  
  > 💡 Tip: Place your sales Excel file in the same directory as the application for easier browsing.
  
@@ -145,8 +137,7 @@ If you need to refresh the packaged application or customize it with your own as
  6. **Adjust Subject Line** if desired. If you type in the subject box, the value stays locked even when switching modes.
  7. **Review Letter Content** in the scrollable preview. Custom content is fully editable.
  8. Click **Run Campaign**. Progress updates appear in the output console at the bottom of the window.
--9. When processing completes, a timestamped folder (e.g., `031224_1430_Personal_Mailing_Campaign`) is created with all generated files.
-+9. When processing completes, a timestamped folder (e.g., `output/031224_1430_Personal_Mailing_Campaign`) is created with all generated files.
+ 9. When processing completes, a timestamped folder (e.g., `output/031224_1430_Personal_Mailing_Campaign`) is created with all generated files.
  
  ---
  
@@ -159,14 +150,19 @@ If you need to refresh the packaged application or customize it with your own as
  | `all_envelopes.docx` | #10 envelope layout, one per recipient. |
  | `mailing_labels.docx` | Avery 5160-compatible 3×10 sheet of labels. |
  | `crm_<mode>_occupied.csv` | Filtered and cleaned contact list for CRM import. |
+ | `data/campaign_history.db` | Consolidated log of every contact mailed, updated after each run. |
  | `processing_log.txt` *(optional)* | Console output when redirected via GUI (copy from output panel if needed). |
- 
- ---
- 
- ## 🛠 Configuration & Customization
+---
+
+## 📊 Campaign History Database
+
+Every successful campaign automatically appends its CRM-ready rows to the SQLite file at `data/campaign_history.db`. The `campaign_contacts` table includes the campaign folder name (`campaign_id`), mode, send timestamp, and the cleaned contact fields. Connect the database to Excel, Google Data Studio, Metabase, or any BI tool to blend in response/conversion outcomes without manually merging CSV exports.
+
+---
+
+## 🛠 Configuration & Customization
  - **Templates** – Edit the predefined templates within `run.py` or pass a custom string to `main(content=...)`.
--- **Signatures** – Add new entries to the `signature_profiles` dictionary in `run.py`, including the path to a PNG signature.
-+- **Signatures** – Add new entries to the `signature_profiles` dictionary in `run.py`, pointing to PNG files stored under `assets/signatures/`.
+ - **Signatures** – Add new entries to the `signature_profiles` dictionary in `run.py`, pointing to PNG files stored under `assets/signatures/`.
  - **Branding** – Replace `Logo.png` or `logo.ico` to update visuals shown in the GUI and exported letters.
  - **Data Rules** – Advanced logic (name cleaning, filtering, CRM export) resides in `AutoMailerPro_v5_1.py`. Adjust the helper functions there for bespoke workflows.
  

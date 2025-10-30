@@ -1,10 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
-
+import sys
 from pathlib import Path
 
 block_cipher = None
 
-BASE_DIR = Path(__file__).parent.resolve()
+spec_path = Path(__file__) if "__file__" in globals() else Path(sys.argv[0])
+BASE_DIR = spec_path.parent.resolve()
 
 datas = [
     (str(BASE_DIR / 'assets' / 'logo.png'), 'assets'),

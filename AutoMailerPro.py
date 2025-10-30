@@ -24,9 +24,11 @@ __contact__ = "scooby_rizz@proton.me"
 
 import os
 import re
+import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Iterable, Mapping
 
 import pandas as pd
 
@@ -221,6 +223,216 @@ DATA_DIR = BASE_DIR / "data"
 ASSETS_DIR = BASE_DIR / "assets"
 SIGNATURES_DIR = ASSETS_DIR / "signatures"
 OUTPUT_ROOT = Path.cwd() / "output"
+CAMPAIGN_DB_FILE = DATA_DIR / "campaign_history.db"
+
+
+CAMPAIGN_CONTACTS_COLUMNS = (
+    "campaign_id",
+    "mode",
+    "sent_at",
+    "name",
+    "address",
+    "zip",
+    "sale_date",
+    "sale_price",
+    "email",
+    "phone",
+    "source",
+)
+
+
+CAMPAIGN_CONTACTS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS campaign_contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    campaign_id TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    name TEXT,
+    address TEXT,
+    zip TEXT,
+    sale_date TEXT,
+    sale_price REAL,
+    email TEXT,
+    phone TEXT,
+    source TEXT
+)
+"""
+
+
+CAMPAIGN_CONTACTS_INSERT_SQL = """
+INSERT INTO campaign_contacts (
+    campaign_id,
+    mode,
+    sent_at,
+    name,
+    address,
+    zip,
+    sale_date,
+    sale_price,
+    email,
+    phone,
+    source
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def _rebuild_campaign_contacts_table(connection):
+    """Recreate the campaign_contacts table, preserving compatible legacy data."""
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='campaign_contacts'"
+    )
+    has_existing = cursor.fetchone() is not None
+
+    if has_existing:
+        cursor.execute("ALTER TABLE campaign_contacts RENAME TO campaign_contacts_legacy")
+
+    cursor.execute(CAMPAIGN_CONTACTS_TABLE_SQL)
+
+    if has_existing:
+        cursor.execute("PRAGMA table_info('campaign_contacts_legacy')")
+        legacy_columns = [row[1] for row in cursor.fetchall()]
+        transferable_columns = [
+            column for column in CAMPAIGN_CONTACTS_COLUMNS if column in legacy_columns
+        ]
+        if transferable_columns:
+            column_list = ", ".join(transferable_columns)
+            cursor.execute(
+                f"INSERT INTO campaign_contacts ({column_list}) "
+                f"SELECT {column_list} FROM campaign_contacts_legacy"
+            )
+        cursor.execute("DROP TABLE IF EXISTS campaign_contacts_legacy")
+
+
+def _ensure_campaign_history_schema(connection):
+    """Ensure the campaign history database has the expected schema."""
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='campaign_contacts'"
+    )
+    result = cursor.fetchone()
+
+    if not result or not result[0]:
+        cursor.execute(CAMPAIGN_CONTACTS_TABLE_SQL)
+        return
+
+    existing_sql = result[0].upper()
+    if "ON CONFLICT" in existing_sql:
+        _rebuild_campaign_contacts_table(connection)
+        return
+
+    cursor.execute("PRAGMA table_info('campaign_contacts')")
+    existing_columns = [row[1] for row in cursor.fetchall()]
+    expected_columns = {"id", *CAMPAIGN_CONTACTS_COLUMNS}
+
+    if not expected_columns.issubset(set(existing_columns)):
+        _rebuild_campaign_contacts_table(connection)
+CAMPAIGN_DB_FILE = DATA_DIR / "campaign_history.db"
+WRITABLE_DATA_DIR = Path.cwd() / "data"
+CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
+
+
+def _initialize_campaign_db(connection: sqlite3.Connection) -> None:
+    """Ensure the SQLite database has the table for campaign contacts."""
+
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS campaign_contacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            campaign_id TEXT NOT NULL,
+            mode TEXT NOT NULL,
+            sent_at TEXT NOT NULL,
+            name TEXT NOT NULL,
+            address TEXT NOT NULL,
+            zip TEXT,
+            sale_date TEXT,
+            sale_price REAL,
+            email TEXT,
+            phone TEXT,
+            source TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (campaign_id, name, address)
+        )
+        """
+    )
+
+
+def _append_campaign_records(
+    records: Iterable[Mapping[str, object]],
+    *,
+    campaign_id: str,
+    mode: str,
+    sent_at: datetime,
+) -> None:
+    """Persist CRM rows into the consolidated SQLite database."""
+
+    records = list(records)
+    if not records:
+        return
+
+    WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    sent_at_iso = sent_at.isoformat(timespec="seconds")
+    try:
+        with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
+            _initialize_campaign_db(connection)
+
+            insert_sql = (
+                """
+                INSERT INTO campaign_contacts (
+                    campaign_id,
+                    mode,
+                    sent_at,
+                    name,
+                    address,
+                    zip,
+                    sale_date,
+                    sale_price,
+                    email,
+                    phone,
+                    source
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(campaign_id, name, address) DO UPDATE SET
+                    mode=excluded.mode,
+                    sent_at=excluded.sent_at,
+                    zip=excluded.zip,
+                    sale_date=excluded.sale_date,
+                    sale_price=excluded.sale_price,
+                    email=excluded.email,
+                    phone=excluded.phone,
+                    source=excluded.source
+                """
+            )
+
+            payload = []
+            for record in records:
+                payload.append(
+                    (
+                        campaign_id,
+                        mode,
+                        sent_at_iso,
+                        str(record.get("Name", "")),
+                        str(record.get("Address", "")),
+                        str(record.get("Zip", "")) or None,
+                        str(record.get("Sale Date", "")) or None,
+                        float(record.get("Sale Price", 0.0) or 0.0),
+                        str(record.get("Email", "")) or None,
+                        str(record.get("Phone", "")) or None,
+                        str(record.get("Source", "")) or None,
+                    )
+                )
+
+            connection.executemany(insert_sql, payload)
+            connection.commit()
+
+            print(
+                f"🗄️ Logged {len(payload)} contacts to campaign history database at {CAMPAIGN_DB_PATH}"
+            )
+    except sqlite3.Error as exc:
+        print(f"⚠️ Failed to log campaign history: {exc}")
 
 ZIP_LOOKUP_FILE = DATA_DIR / "zip_lookup.csv"
 MASTER_CLIENT_LIST = DATA_DIR / "master_client_list.xlsx"
@@ -265,6 +477,122 @@ def _normalize_zip(zip_code):
     if digits_only:
         return digits_only.zfill(5)
     return ""
+
+def append_campaign_history(campaign_id, mode, crm_rows):
+    """Append campaign contacts to the SQLite history database."""
+
+    if not crm_rows:
+        return
+
+    CAMPAIGN_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    sent_at = datetime.utcnow().isoformat(timespec="seconds")
+    rows_to_insert = []
+    for row in crm_rows:
+        sale_price_raw = row.get("Sale Price", 0.0)
+        try:
+            sale_price = float(sale_price_raw or 0.0)
+        except (TypeError, ValueError):
+            sale_price = 0.0
+
+        rows_to_insert.append(
+            (
+                campaign_id,
+                mode,
+                sent_at,
+                row.get("Name", ""),
+                row.get("Address", ""),
+                row.get("Zip", ""),
+                row.get("Sale Date", ""),
+                sale_price,
+                row.get("Email", ""),
+                row.get("Phone", ""),
+                row.get("Source", ""),
+            )
+        )
+
+    try:
+        with sqlite3.connect(CAMPAIGN_DB_FILE) as connection:
+            _ensure_campaign_history_schema(connection)
+            cursor = connection.cursor()
+            cursor.executemany(CAMPAIGN_CONTACTS_INSERT_SQL, rows_to_insert)
+            connection.commit()
+        print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_FILE}")
+    except sqlite3.Error as error:
+        print(f"⚠️ Failed to log campaign history: {error}")
+
+
+def append_campaign_history(campaign_id, mode, crm_rows):
+    """Append campaign contacts to the SQLite history database."""
+
+    if not crm_rows:
+        return
+
+    CAMPAIGN_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(CAMPAIGN_DB_FILE)
+
+    try:
+        cursor = connection.cursor()
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS campaign_contacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id TEXT NOT NULL,
+                mode TEXT NOT NULL,
+                sent_at TEXT NOT NULL,
+                name TEXT,
+                address TEXT,
+                zip TEXT,
+                sale_date TEXT,
+                sale_price REAL,
+                email TEXT,
+                phone TEXT,
+                source TEXT
+            )
+            """
+        )
+
+        sent_at = datetime.utcnow().isoformat(timespec="seconds")
+        rows_to_insert = [
+            (
+                campaign_id,
+                mode,
+                sent_at,
+                row.get("Name", ""),
+                row.get("Address", ""),
+                row.get("Zip", ""),
+                row.get("Sale Date", ""),
+                float(row.get("Sale Price", 0.0) or 0.0),
+                row.get("Email", ""),
+                row.get("Phone", ""),
+                row.get("Source", ""),
+            )
+            for row in crm_rows
+        ]
+
+        cursor.executemany(
+            """
+            INSERT INTO campaign_contacts (
+                campaign_id,
+                mode,
+                sent_at,
+                name,
+                address,
+                zip,
+                sale_date,
+                sale_price,
+                email,
+                phone,
+                source
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows_to_insert,
+        )
+        connection.commit()
+        print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_FILE}")
+    finally:
+        connection.close()
 
 
 def _compose_city_state_zip(row, zip_code):
@@ -642,12 +970,13 @@ def main(
             oldest_sale = sale_dates.min()
             newest_sale = sale_dates.max()
             sale_date_range_label = f"{oldest_sale.strftime('%m%d%y')}-{newest_sale.strftime('%m%d%y')}"
-
+    run_started_at = datetime.now()
+    timestamp = run_started_at.strftime("%m%d%y_%H%M%S")
     OUTPUT_ROOT.mkdir(exist_ok=True)
     if sale_date_range_label:
         folder_name = f"{sale_date_range_label}_{mode.capitalize()}_Mailing_Campaign"
     else:
-        timestamp = datetime.now().strftime("%m%d%y_%H%M%S")
+        
         folder_name = f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
 
     OUTPUT_DIR = OUTPUT_ROOT / folder_name
@@ -660,7 +989,7 @@ def main(
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     if created_output_dir:
         print(f"📁 Created output folder: {OUTPUT_DIR}")
-        
+
     labels = []
     crm_rows = []
     is_new_format = 'Executive First Name' in df.columns and 'Executive Last Name' in df.columns
@@ -743,7 +1072,14 @@ def main(
             dict_writer.writeheader()
             dict_writer.writerows(crm_rows)
         print(f"📥 CRM-ready CSV saved to: {CRM_EXPORT_FILE}")
-
+        append_campaign_history(folder_name, mode, crm_rows)
+        _append_campaign_records(
+            crm_rows,
+            campaign_id=OUTPUT_DIR.name,
+            mode=mode,
+            sent_at=run_started_at,
+        )
+        append_campaign_history(folder_name, mode, crm_rows)
     letters_doc.save(str(LETTERS_FILE))
     envelopes_doc.save(str(ENVELOPES_FILE))
     print(f"📄 All letters saved to: {LETTERS_FILE}")

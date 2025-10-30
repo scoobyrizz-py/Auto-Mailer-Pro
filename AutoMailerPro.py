@@ -612,18 +612,7 @@ def main(
                 "Best Regards,"
             )
 
-    timestamp = datetime.now().strftime("%m%d%y_%H%M%S")
-    OUTPUT_ROOT.mkdir(exist_ok=True)
-    OUTPUT_DIR = OUTPUT_ROOT / f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
-    LETTERS_FILE = OUTPUT_DIR / "all_letters.docx"
-    ENVELOPES_FILE = OUTPUT_DIR / "all_envelopes.docx"
-    LABELS_FILE = OUTPUT_DIR / "mailing_labels.docx"
-    CRM_EXPORT_FILE = OUTPUT_DIR / f"crm_{mode}_occupied.csv"
 
-    created_output_dir = not OUTPUT_DIR.exists()
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    if created_output_dir:
-        print(f"📁 Created output folder: {OUTPUT_DIR}")
 
     letters_doc = Document()
     envelopes_doc = Document()
@@ -645,7 +634,33 @@ def main(
         df = pd.read_excel(file_path)
     except Exception as e:
         raise Exception(f"Failed to read Excel file: {e}")
+    sale_date_range_label = None
+    if 'Sale Date' in df.columns:
+        sale_dates = pd.to_datetime(df['Sale Date'], errors='coerce')
+        sale_dates = sale_dates.dropna()
+        if not sale_dates.empty:
+            oldest_sale = sale_dates.min()
+            newest_sale = sale_dates.max()
+            sale_date_range_label = f"{oldest_sale.strftime('%m%d%y')}-{newest_sale.strftime('%m%d%y')}"
 
+    OUTPUT_ROOT.mkdir(exist_ok=True)
+    if sale_date_range_label:
+        folder_name = f"{sale_date_range_label}_{mode.capitalize()}_Mailing_Campaign"
+    else:
+        timestamp = datetime.now().strftime("%m%d%y_%H%M%S")
+        folder_name = f"{timestamp}_{mode.capitalize()}_Mailing_Campaign"
+
+    OUTPUT_DIR = OUTPUT_ROOT / folder_name
+    LETTERS_FILE = OUTPUT_DIR / "all_letters.docx"
+    ENVELOPES_FILE = OUTPUT_DIR / "all_envelopes.docx"
+    LABELS_FILE = OUTPUT_DIR / "mailing_labels.docx"
+    CRM_EXPORT_FILE = OUTPUT_DIR / f"crm_{mode}_occupied.csv"
+
+    created_output_dir = not OUTPUT_DIR.exists()
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if created_output_dir:
+        print(f"📁 Created output folder: {OUTPUT_DIR}")
+        
     labels = []
     crm_rows = []
     is_new_format = 'Executive First Name' in df.columns and 'Executive Last Name' in df.columns

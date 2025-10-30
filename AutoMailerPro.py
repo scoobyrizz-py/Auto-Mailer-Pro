@@ -246,15 +246,49 @@ def load_zip_lookup():
         return
     df = pd.read_csv(ZIP_LOOKUP_FILE, dtype=str)
     for _, row in df.iterrows():
-        zip_code = row['zip'].zfill(5)
-        city_state = f"{row['city'].title()}, {row['state'].upper()}"
-        zip_city_state[zip_code] = city_state
+        raw_zip = row.get("zip")
+        normalized_zip = _normalize_zip(raw_zip)
+        if not normalized_zip:
+            continue
+        city = str(row.get("city", "")).strip()
+        state = str(row.get("state", "")).strip()
+        if not city or not state:
+            continue
+        city_state = f"{city.title()}, {state.upper()}"
+        zip_city_state[normalized_zip] = city_state
+
+def _normalize_zip(zip_code):
+    """Return the 5-digit portion of a ZIP code string if available."""
+    if zip_code is None:
+        return ""
+
+    digits_only = re.sub(r"\D", "", str(zip_code))
+    if len(digits_only) >= 5:
+        return digits_only[:5]
+    if digits_only:
+        return digits_only.zfill(5)
+    return ""
+
+def _normalize_zip(zip_code):
+    """Return the 5-digit portion of a ZIP code string if available."""
+    if zip_code is None:
+        return ""
+
+    digits_only = re.sub(r"\D", "", str(zip_code))
+    if len(digits_only) >= 5:
+        return digits_only[:5]
+    if digits_only:
+        return digits_only.zfill(5)
+    return ""
 
 def zip_to_city_state(zip_code):
-    zip_code = str(zip_code).zfill(5)
-    city_state = zip_city_state.get(zip_code, "Indian River County, FL")
-    return f"{city_state} {zip_code}"
-
+    normalized_zip = _normalize_zip(zip_code)
+    city_state = zip_city_state.get(normalized_zip, "Indian River County, FL") if normalized_zip else "Indian River County, FL"
+    display_zip = normalized_zip or str(zip_code).strip()
+    if not display_zip or display_zip.lower() in {"nan", ""}:
+        return city_state
+    return f"{city_state} {display_zip}".strip()
+    
 # === LOAD CLIENT LIST FOR SCRUBBING ===
 def load_client_list():
     if not MASTER_CLIENT_LIST.exists():

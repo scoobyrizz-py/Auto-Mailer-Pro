@@ -191,8 +191,7 @@ def _build_mailing_address(row):
     if line_two:
         parts.append(line_two)
 
-    city = _get_first_nonempty(row, ["Mailing City", "City"])
-    state = _get_first_nonempty(row, ["Mailing State", "State"])
+
     zip_code = _get_first_nonempty(row, [
         "Mailing Zip",
         "Mailing ZIP",
@@ -200,9 +199,7 @@ def _build_mailing_address(row):
         "Zip Code",
         "Zip",
     ])
-
-    city_state = ", ".join(part for part in [city, state] if part)
-    city_state_zip = " ".join(part for part in [city_state, zip_code] if part)
+    city_state_zip = _compose_city_state_zip(row, zip_code)
     if city_state_zip:
         parts.append(city_state_zip)
 
@@ -269,17 +266,40 @@ def _normalize_zip(zip_code):
         return digits_only.zfill(5)
     return ""
 
-def _normalize_zip(zip_code):
-    """Return the 5-digit portion of a ZIP code string if available."""
-    if zip_code is None:
-        return ""
 
-    digits_only = re.sub(r"\D", "", str(zip_code))
-    if len(digits_only) >= 5:
-        return digits_only[:5]
-    if digits_only:
-        return digits_only.zfill(5)
-    return ""
+def _compose_city_state_zip(row, zip_code):
+    """Create a display string for city/state/ZIP using row data before falling back."""
+    city = _get_first_nonempty(row, ["Mailing City", "City"]).strip()
+    state = _get_first_nonempty(row, ["Mailing State", "State"]).strip()
+
+    city_formatted = city.title() if city else ""
+    state_formatted = state.upper() if state else ""
+
+    location = ""
+    if city_formatted and state_formatted:
+        location = f"{city_formatted}, {state_formatted}"
+    elif city_formatted:
+        location = city_formatted
+    elif state_formatted:
+        location = state_formatted
+
+    display_zip = ""
+    if zip_code is not None:
+        raw_zip = str(zip_code).strip()
+        if raw_zip and raw_zip.lower() != "nan":
+            normalized_zip = _normalize_zip(zip_code)
+            display_zip = normalized_zip or raw_zip
+
+    if location:
+        if display_zip:
+            return f"{location} {display_zip}".strip()
+        return location
+
+    fallback = zip_to_city_state(zip_code)
+    if fallback:
+        return fallback
+    return display_zip
+
 
 def zip_to_city_state(zip_code):
     normalized_zip = _normalize_zip(zip_code)
@@ -288,7 +308,7 @@ def zip_to_city_state(zip_code):
     if not display_zip or display_zip.lower() in {"nan", ""}:
         return city_state
     return f"{city_state} {display_zip}".strip()
-    
+
 # === LOAD CLIENT LIST FOR SCRUBBING ===
 def load_client_list():
     if not MASTER_CLIENT_LIST.exists():
@@ -469,7 +489,7 @@ def add_letter_to_doc(doc, name, address, zip_code, sale_date, sale_price, conte
     doc.add_page_break()
 
 # === ADD ENVELOPE TO DOC ===
-def add_envelope_to_doc(doc, name, address, zip_code, signature_name):
+def add_envelope_to_doc(doc, name, address, location_line, signature_name):
     section = doc.add_section()
     section.page_width = Inches(9.5)
     section.page_height = Inches(4.125)
@@ -492,7 +512,8 @@ def add_envelope_to_doc(doc, name, address, zip_code, signature_name):
     name_run = recipient.add_run(f"{name}\n")
     name_run.bold = True
     name_run.font.size = Pt(14)
-    addr_run = recipient.add_run(f"{address}\n{zip_to_city_state(zip_code)}")
+    addr_line = f"{address}\n{location_line}" if location_line else address
+    addr_run = recipient.add_run(addr_line)
     addr_run.font.size = Pt(14)
 
     doc.add_page_break()
@@ -653,6 +674,7 @@ def main(
             address = _get_first_nonempty(row, ['Address', 'Situs']).title().strip()
             zip_code = _get_first_nonempty(row, ['Site Zip Code', 'Property Zip', 'Zip Code', 'Zip'])
             mailing_address = mailing_address_value if mode == "personal" else _get_first_nonempty(row, ['Address'])
+            location_line = _compose_city_state_zip(row, zip_code)
             sale_date_raw = _get_first_nonempty(row, ['Sale Date']) if not is_new_format else "Unknown"
             sale_price_str = _get_first_nonempty(row, ['Sale Price']) if not is_new_format else "0.0"
             sale_price_str = sale_price_str.replace('$', '').replace(',', '') if sale_price_str else ''
@@ -675,9 +697,9 @@ def main(
                 sale_date = "Unknown"
 
             add_letter_to_doc(letters_doc, name, address, zip_code, sale_date, sale_price, content, mode, subject_line, signature_name, signature_title, signature_image, signature_email)
-            add_envelope_to_doc(envelopes_doc, name, address, zip_code, signature_name)
+            add_envelope_to_doc(envelopes_doc, name, address, location_line, signature_name)
 
-            label_text = f"{name}\n{address}\n{zip_to_city_state(zip_code)}"
+            label_text = f"{name}\n{address}\n{location_line}" if location_line else f"{name}\n{address}"
             labels.append(label_text)
 
             crm_rows.append({

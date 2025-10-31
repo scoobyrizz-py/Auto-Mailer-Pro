@@ -461,7 +461,10 @@ def open_customer_manager():
         anchor = tk.W if column not in {"premium", "home_price"} else tk.E
         width = 180 if column == "name" else 150
         tree.column(column, width=width, anchor=anchor)
-
+    scrollbar = ttk.Scrollbar(container, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    scrollbar = ttk.Scrollbar(container, orient="vertical", command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
     scrollbar.grid(row=2, column=4, sticky="ns")
 
     report_options_frame = ttk.LabelFrame(container, text="Report Filters", padding="15")
@@ -956,8 +959,8 @@ def open_customer_manager():
 
         cost_entry.bind("<Return>", calculate_roi)
         units_entry.bind("<Return>", calculate_roi)
-        button_frame = ttk.Frame(container, padding="5")
-        button_frame.grid(row=5, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    button_frame = ttk.Frame(container, padding="5")
+    button_frame.grid(row=5, column=0, columnspan=5, sticky="ew", pady=(15, 0))
     for index in range(3):
         button_frame.columnconfigure(index, weight=1)
 
@@ -1084,8 +1087,10 @@ def show_about_dialog() -> None:
         """
         Auto Mailer Pro
 
-        Built with the support of GPT-5-Codex to help automate multi-stage marketing campaigns for Jones Insurance Advisors.
+        This program was built by Kyle Padilla to help automate multi-stage marketing campaigns for Jones Insurance Advisors, Inc.
         This distribution bundles a local database so each workstation tracks its own outreach and premium performance.
+        For support, contact Kyle Padilla at Kyle@jonesia.com.
+        All rights reserved Kyle R S Padilla 2025.
         """
     ).strip()
     messagebox.showinfo("About Auto Mailer Pro", about_text)

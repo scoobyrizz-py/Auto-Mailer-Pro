@@ -384,6 +384,7 @@ def ensure_local_database() -> Path:
 CUSTOMERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS customers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_key TEXT,
     name TEXT NOT NULL,
     email TEXT,
     phone TEXT,
@@ -391,6 +392,8 @@ CREATE TABLE IF NOT EXISTS customers (
     home_price REAL DEFAULT 0,
     responded INTEGER DEFAULT 0,
     converted INTEGER DEFAULT 0,
+    address TEXT,
+    zip TEXT,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
 )
@@ -401,8 +404,46 @@ def _ensure_customers_table(connection: sqlite3.Connection) -> None:
     """Create the customers table if it is missing."""
 
     cursor = connection.cursor()
-    cursor.execute(CUSTOMERS_TABLE_SQL)    
+    cursor.execute(CUSTOMERS_TABLE_SQL)
+    cursor.execute("PRAGMA table_info('customers')")
+    existing_columns = {row[1] for row in cursor.fetchall()}
+    for column, definition in (
+        ("contact_key", "TEXT"),
+        ("address", "TEXT"),
+        ("zip", "TEXT"),
+    ):
+        if column not in existing_columns:
+            cursor.execute(f"ALTER TABLE customers ADD COLUMN {column} {definition}")
+    connection.commit()
+    _backfill_customer_contact_keys(connection)
     _ensure_campaign_history_schema(connection)
+
+
+def _backfill_customer_contact_keys(connection: sqlite3.Connection) -> None:
+    """Ensure every customer row has a contact key for matching."""
+
+    cursor = connection.cursor()
+    cursor.execute(
+        "SELECT id, name, address, zip, contact_key FROM customers"
+    )
+    updates = []
+    for row in cursor.fetchall():
+        customer_id, name, address, zip_code, contact_key = row
+        if contact_key:
+            continue
+        computed = _compute_contact_key(name, address, zip_code)
+        if not computed:
+            computed = f"customer_{customer_id}"
+        updates.append((computed, customer_id))
+
+    if updates:
+        cursor.executemany(
+            "UPDATE customers SET contact_key = ? WHERE id = ?",
+            updates,
+        )
+        connection.commit()
+
+
 
 
 def _append_campaign_records(
@@ -498,6 +539,37 @@ def _normalize_zip(zip_code):
         return digits_only.zfill(5)
     return ""
 
+def _normalize_contact_component(value: object) -> str:
+    """Normalize name or address fragments for consistent comparisons."""
+
+    if value in (None, ""):
+        return ""
+    normalized = re.sub(r"\s+", " ", str(value)).strip().lower()
+    return re.sub(r"[^a-z0-9 ]", "", normalized)
+
+
+def _compute_contact_key(
+    name: object, address: object = "", zip_code: object = ""
+) -> str:
+    """Build a stable key representing a unique contact."""
+
+    name_part = _normalize_contact_component(name)
+    address_part = _normalize_contact_component(address)
+    zip_part = _normalize_contact_component(zip_code)
+
+    address_components = [address_part]
+    if zip_part:
+        address_components.append(zip_part)
+    joined_address = " ".join(part for part in address_components if part)
+
+    if name_part and joined_address:
+        return f"{name_part}|{joined_address}"
+    if name_part:
+        return name_part
+    if joined_address:
+        return joined_address
+    return ""
+
 def append_campaign_history(campaign_id, mode, crm_rows):
     """Append campaign contacts to the SQLite history database."""
 
@@ -560,22 +632,118 @@ def _to_float(value: object) -> float:
 
 
 def list_customers() -> List[Dict[str, object]]:
-    """Return all stored customers for display in the GUI."""
+    """Return merged contact history with saved customer outcomes."""
 
     WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_local_database()
+
     with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
         connection.row_factory = sqlite3.Row
         _prepare_customer_database(connection)
-        cursor = connection.execute(
-            """
-            SELECT id, name, email, phone, premium, home_price, responded, converted,
-                   created_at, updated_at
-            FROM customers
-            ORDER BY name COLLATE NOCASE
-            """
-        )
-        return [dict(row) for row in cursor.fetchall()]
 
+        campaign_rows = connection.execute(
+            """
+            SELECT name, address, zip, email, phone, sent_at
+            FROM campaign_contacts
+            ORDER BY datetime(sent_at) DESC, id DESC
+            """
+        ).fetchall()
+
+        contact_index: Dict[str, Dict[str, object]] = {}
+        for row in campaign_rows:
+            key = _compute_contact_key(row["name"], row["address"], row["zip"])
+            if not key:
+                continue
+            entry = contact_index.get(key)
+            if entry is None:
+                entry = {
+                    "contact_key": key,
+                    "name": str(row["name"] or ""),
+                    "address": str(row["address"] or ""),
+                    "zip": str(row["zip"] or ""),
+                    "email": str(row["email"] or ""),
+                    "phone": str(row["phone"] or ""),
+                    "mailings_count": 1,
+                    "last_sent_at": str(row["sent_at"] or ""),
+                }
+                contact_index[key] = entry
+            else:
+                entry["mailings_count"] += 1
+                sent_at = str(row["sent_at"] or "")
+                if sent_at and sent_at > entry.get("last_sent_at", ""):
+                    entry["last_sent_at"] = sent_at
+                for field in ("name", "address", "zip", "email", "phone"):
+                    if not entry.get(field) and row[field]:
+                        entry[field] = str(row[field])
+
+        status_rows = connection.execute(
+            """
+            SELECT id, contact_key, name, email, phone, premium, home_price,
+                   responded, converted, address, zip, updated_at
+            FROM customers
+            """
+        ).fetchall()
+
+        status_index: Dict[str, sqlite3.Row] = {}
+        for row in status_rows:
+            key = row["contact_key"] or _compute_contact_key(
+                row["name"], row["address"], row["zip"]
+            )
+            if not key:
+                continue
+            existing = status_index.get(key)
+            if existing is None:
+                status_index[key] = row
+            else:
+                current_updated = str(row["updated_at"] or "")
+                previous_updated = str(existing["updated_at"] or "")
+                if current_updated > previous_updated:
+                    status_index[key] = row
+
+        records: List[Dict[str, object]] = []
+        for key, contact in contact_index.items():
+            status = status_index.get(key)
+            premium = _to_float(status["premium"]) if status else 0.0
+            home_price = _to_float(status["home_price"]) if status else 0.0
+            record = {
+                "id": int(status["id"]) if status and status["id"] is not None else None,
+                "contact_key": key,
+                "name": (status["name"] if status and status["name"] else contact["name"]).strip(),
+                "email": (status["email"] if status and status["email"] else contact["email"]).strip(),
+                "phone": (status["phone"] if status and status["phone"] else contact["phone"]).strip(),
+                "premium": premium,
+                "home_price": home_price,
+                "responded": bool(status["responded"]) if status else False,
+                "converted": bool(status["converted"]) if status else False,
+                "address": (status["address"] if status and status["address"] else contact["address"]).strip(),
+                "zip": (status["zip"] if status and status["zip"] else contact["zip"]).strip(),
+                "mailings_count": contact["mailings_count"],
+                "last_sent_at": contact.get("last_sent_at", ""),
+            }
+            records.append(record)
+
+        for key, status in status_index.items():
+            if key in contact_index:
+                continue
+            record = {
+                "id": int(status["id"]) if status["id"] is not None else None,
+                "contact_key": key,
+                "name": str(status["name"] or ""),
+                "email": str(status["email"] or ""),
+                "phone": str(status["phone"] or ""),
+                "premium": _to_float(status["premium"]),
+                "home_price": _to_float(status["home_price"]),
+                "responded": bool(status["responded"]),
+                "converted": bool(status["converted"]),
+                "address": str(status["address"] or ""),
+                "zip": str(status["zip"] or ""),
+                "mailings_count": 0,
+                "last_sent_at": "",
+            }
+            records.append(record)
+
+        records.sort(key=lambda item: item.get("name", "").lower())
+        return records
 
 def save_customer(customer: Mapping[str, object]) -> int:
     """Insert or update a customer record in the database."""
@@ -590,7 +758,11 @@ def save_customer(customer: Mapping[str, object]) -> int:
     home_price = _to_float(customer.get("home_price"))
     responded = 1 if customer.get("responded") else 0
     converted = 1 if customer.get("converted") else 0
+    address = str(customer.get("address", "")).strip() or None
+    zip_code = str(customer.get("zip", "")).strip() or None
+
     customer_id = customer.get("id")
+    contact_key = str(customer.get("contact_key", "")).strip()
 
     WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
     ensure_local_database()
@@ -598,7 +770,70 @@ def save_customer(customer: Mapping[str, object]) -> int:
         _prepare_customer_database(connection)
         cursor = connection.cursor()
 
+        existing_id = None
+        existing_key = ""
         if customer_id:
+            cursor.execute(
+                "SELECT id, contact_key FROM customers WHERE id = ?",
+                (customer_id,),
+            )
+            row = cursor.fetchone()
+            if row:
+                existing_id = int(row[0])
+                existing_key = str(row[1] or "")
+
+        computed_key = _compute_contact_key(name, address, zip_code)
+        if computed_key:
+            contact_key = computed_key
+        elif not contact_key and existing_key:
+            contact_key = existing_key
+
+        if not contact_key:
+            raise ValueError("Unable to determine a contact identifier from the provided data.")
+
+        if existing_id is not None:
+            cursor.execute(
+                """
+                UPDATE customers
+                SET contact_key = ?,
+                    name = ?,
+                    email = ?,
+                    phone = ?,
+                    premium = ?,
+                    home_price = ?,
+                    responded = ?,
+                    converted = ?,
+                    address = ?,
+                    zip = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (
+                    contact_key,
+                    name,
+                    email,
+                    phone,
+                    premium,
+                    home_price,
+                    responded,
+                    converted,
+                    address,
+                    zip_code,
+                    existing_id,
+                ),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Customer not found")
+            connection.commit()
+            return existing_id
+
+        cursor.execute(
+            "SELECT id FROM customers WHERE contact_key = ?",
+            (contact_key,),
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_id = int(row[0])
             cursor.execute(
                 """
                 UPDATE customers
@@ -609,27 +844,58 @@ def save_customer(customer: Mapping[str, object]) -> int:
                     home_price = ?,
                     responded = ?,
                     converted = ?,
+                    address = ?,
+                    zip = ?,
                     updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE contact_key = ?
                 """,
-                (name, email, phone, premium, home_price, responded, converted, customer_id),
+                (
+                    name,
+                    email,
+                    phone,
+                    premium,
+                    home_price,
+                    responded,
+                    converted,
+                    address,
+                    zip_code,
+                    contact_key,
+                ),
             )
-            if cursor.rowcount == 0:
-                raise ValueError("Customer not found")
             connection.commit()
-            return int(customer_id)
+            return existing_id
 
         cursor.execute(
             """
-            INSERT INTO customers (name, email, phone, premium, home_price, responded, converted)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO customers (
+                contact_key,
+                name,
+                email,
+                phone,
+                premium,
+                home_price,
+                responded,
+                converted,
+                address,
+                zip
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (name, email, phone, premium, home_price, responded, converted),
+            (
+                contact_key,
+                name,
+                email,
+                phone,
+                premium,
+                home_price,
+                responded,
+                converted,
+                address,
+                zip_code,
+            ),
         )
         connection.commit()
         return int(cursor.lastrowid)
-
-
+        
 def _compute_group_metrics(customers: Iterable[Mapping[str, object]]) -> Dict[str, float]:
     records = list(customers)
     total_customers = len(records)

@@ -475,7 +475,7 @@ def open_customer_manager():
     home_price_var = tk.StringVar()
     responded_var = tk.BooleanVar()
     converted_var = tk.BooleanVar()
-    selected_customer = {"id": None}
+    selected_customer = {"id": None, "contact_key": None, "address": "", "zip": ""}
     customer_rows: list = []
     name_index: list = []
     current_search_matches: Optional[List[Dict[str, object]]] = None
@@ -517,6 +517,9 @@ def open_customer_manager():
         responded_var.set(False)
         converted_var.set(False)
         selected_customer["id"] = None
+        selected_customer["contact_key"] = None
+        selected_customer["address"] = ""
+        selected_customer["zip"] = ""
         tree.selection_remove(tree.selection())
 
     def clear_suggestions():
@@ -556,7 +559,7 @@ def open_customer_manager():
         query = search_var.get().strip().lower()
         tree.delete(*tree.get_children())
         dataset = customer_rows if current_search_matches is None else current_search_matches
-        for customer in dataset:
+        for index, customer in enumerate(dataset):
             searchable = " ".join(
                 [
                     str(customer.get("name", "")),
@@ -565,7 +568,7 @@ def open_customer_manager():
                 ]
             ).lower()
             if current_search_matches is None and query and query not in searchable:
-                continue          
+                continue
             try:
                 premium_value = float(customer.get("premium") or 0)
             except (TypeError, ValueError):
@@ -575,10 +578,13 @@ def open_customer_manager():
             except (TypeError, ValueError):
                 home_price_value = 0.0
 
+            row_identifier = customer.get("contact_key") or (
+                str(customer.get("id")) if customer.get("id") is not None else f"row_{index}"
+            )
             tree.insert(
                 "",
                 tk.END,
-                iid=str(customer.get("id")),
+                iid=str(row_identifier),
                 values=(
                     customer.get("name", ""),
                     customer.get("email", ""),
@@ -673,13 +679,21 @@ def open_customer_manager():
             return
         customer_id = selection[0]
         customer = next(
-            (row for row in customer_rows if str(row.get("id")) == customer_id),
+            (
+                row
+                for row in customer_rows
+                if row.get("contact_key") == customer_id
+                or str(row.get("id")) == customer_id
+            ),
             None,
         )
         if not customer:
             return
 
         selected_customer["id"] = customer.get("id")
+        selected_customer["contact_key"] = customer.get("contact_key")
+        selected_customer["address"] = customer.get("address", "")
+        selected_customer["zip"] = customer.get("zip", "")
         name_var.set(customer.get("name", ""))
         email_var.set(customer.get("email", ""))
         phone_var.set(customer.get("phone", ""))
@@ -691,6 +705,7 @@ def open_customer_manager():
     def save_selected_customer():
         payload = {
             "id": selected_customer.get("id"),
+            "contact_key": selected_customer.get("contact_key"),
             "name": name_var.get().strip(),
             "email": email_var.get().strip(),
             "phone": phone_var.get().strip(),
@@ -698,6 +713,8 @@ def open_customer_manager():
             "home_price": home_price_var.get().strip(),
             "responded": responded_var.get(),
             "converted": converted_var.get(),
+            "address": selected_customer.get("address", ""),
+            "zip": selected_customer.get("zip", ""),
         }
         try:
             saved_id = AutoMailerPro.save_customer(payload)
@@ -711,6 +728,7 @@ def open_customer_manager():
         action = "updated" if payload.get("id") else "added"
         messagebox.showinfo("Success", f"Customer {action} successfully.")
         selected_customer["id"] = saved_id
+        selected_customer["contact_key"] = payload.get("contact_key")
         refresh_tree()
         clear_form()
 

@@ -5,13 +5,14 @@ import shutil
 import sys
 import threading
 
+from fuzzywuzzy import fuzz
 
 import AutoMailerPro
 import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from ttkthemes import ThemedTk
 from textwrap import dedent
-from typing import Dict
+from typing import Dict, List, Optional
 
 def get_base_dir() -> Path:
     """Return the directory that holds bundled resources."""
@@ -373,12 +374,17 @@ def open_customer_manager():
     search_frame = ttk.LabelFrame(container, text="Search & Quick Find", padding="15")
     search_frame.grid(row=0, column=0, columnspan=5, sticky="ew")
     search_frame.columnconfigure(0, weight=1)
+    search_frame.columnconfigure(1, weight=0)
+    search_frame.columnconfigure(2, weight=0)
 
     search_var = tk.StringVar()
     search_entry = ttk.Entry(search_frame, textvariable=search_var)
     search_entry.grid(row=0, column=0, sticky="ew", pady=5)
-    ttk.Button(search_frame, text="Clear Search", command=lambda: clear_search()).grid(
+    ttk.Button(search_frame, text="Search", command=lambda: perform_search()).grid(
         row=0, column=1, padx=5, pady=5
+    )
+    ttk.Button(search_frame, text="Clear Search", command=lambda: clear_search()).grid(
+        row=0, column=2, padx=5, pady=5
     )
     ttk.Label(
         search_frame,
@@ -463,6 +469,7 @@ def open_customer_manager():
     selected_customer = {"id": None}
     customer_rows: list = []
     name_index: list = []
+    current_search_matches: Optional[List[Dict[str, object]]] = None
     search_trace_id = None
 
     ttk.Label(form_frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
@@ -504,12 +511,16 @@ def open_customer_manager():
         tree.selection_remove(tree.selection())
 
     def clear_search():
+        nonlocal current_search_matches
+        current_search_matches = None
         search_var.set("")
         search_entry.focus_set()
+
     def apply_filters():
         query = search_var.get().strip().lower()
         tree.delete(*tree.get_children())
-        for customer in customer_rows:
+        dataset = customer_rows if current_search_matches is None else current_search_matches
+        for customer in dataset:
             searchable = " ".join(
                 [
                     str(customer.get("name", "")),
@@ -517,8 +528,8 @@ def open_customer_manager():
                     str(customer.get("phone", "")),
                 ]
             ).lower()
-            if query and query not in searchable:
-                continue            
+            if current_search_matches is None and query and query not in searchable:
+                continue          
             try:
                 premium_value = float(customer.get("premium") or 0)
             except (TypeError, ValueError):
@@ -543,13 +554,14 @@ def open_customer_manager():
                 ),
             )
     def refresh_tree():
-        nonlocal customer_rows, name_index
+        nonlocal customer_rows, name_index, current_search_matches
         try:
             customer_rows = AutoMailerPro.list_customers()
         except Exception as exc:
             messagebox.showerror("Error", f"Unable to load customers: {exc}")
             customer_rows = []
             name_index = []
+            current_search_matches = None
             tree.delete(*tree.get_children())
             return
 
@@ -560,6 +572,7 @@ def open_customer_manager():
                 if str(row.get("name", "")).strip()
             }
         )
+        current_search_matches = None
         apply_filters()
 
     def autocomplete_search(event):
@@ -590,7 +603,6 @@ def open_customer_manager():
         on_select(None)
 
     search_entry.bind("<KeyRelease>", autocomplete_search)
-    search_entry.bind("<Return>", focus_first_result)
 
     def on_select(event):
         selection = tree.selection()
@@ -801,8 +813,51 @@ def open_customer_manager():
             window_to_close.destroy()
 
     customer_window.protocol("WM_DELETE_WINDOW", on_close)
+    def perform_search(event=None):
+        nonlocal current_search_matches
+        query = search_var.get().strip()
+        if not query:
+            current_search_matches = None
+            apply_filters()
+            focus_first_result()
+            return
+
+        lowered = query.lower()
+        scored_matches: List[tuple[int, Dict[str, object]]] = []
+        for customer in customer_rows:
+            name_value = str(customer.get("name", ""))
+            email_value = str(customer.get("email", ""))
+            phone_value = re.sub(r"\D", "", str(customer.get("phone", "")))
+            scores = []
+            for value in (name_value, email_value, phone_value):
+                if not value:
+                    continue
+                comparison_source = value.lower()
+                scores.append(fuzz.partial_ratio(lowered, comparison_source))
+            best_score = max(scores, default=0)
+            if best_score >= 60:
+                scored_matches.append((best_score, customer))
+
+        if not scored_matches:
+            messagebox.showinfo(
+                "No Matches",
+                "No customers were found matching your search. Try a different name or spelling.",
+            )
+            current_search_matches = None
+            apply_filters()
+            return
+
+        scored_matches.sort(key=lambda item: item[0], reverse=True)
+        current_search_matches = [customer for _, customer in scored_matches]
+        apply_filters()
+        focus_first_result()
+
+    search_entry.bind("<Return>", perform_search)
 
     def watch_search(*_):
+        nonlocal current_search_matches
+        if current_search_matches is not None:
+            current_search_matches = None
         apply_filters()
 
     search_trace_id = search_var.trace_add("write", watch_search)

@@ -346,8 +346,8 @@ CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
 def _initialize_campaign_db(connection: sqlite3.Connection) -> None:
     """Ensure the SQLite database has the table for campaign contacts."""
-
-connection.execute(CAMPAIGN_CONTACTS_TABLE_SQL)
+    
+    _ensure_campaign_history_schema(connection)
 
 
 def _append_campaign_records(

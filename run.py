@@ -369,7 +369,7 @@ def open_customer_manager():
     container = ttk.Frame(customer_window, padding="20")
     container.pack(fill=tk.BOTH, expand=True)
     container.columnconfigure(0, weight=1)
-    container.rowconfigure(1, weight=1)
+    container.rowconfigure(2, weight=1)
 
     search_frame = ttk.LabelFrame(container, text="Search & Quick Find", padding="15")
     search_frame.grid(row=0, column=0, columnspan=5, sticky="ew")
@@ -400,6 +400,40 @@ def open_customer_manager():
     )
     suggestion_listbox.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
     suggestion_listbox.grid_remove()
+    filter_frame = ttk.Frame(container)
+    filter_frame.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(10, 5))
+    filter_frame.columnconfigure(3, weight=1)
+
+    ttk.Label(filter_frame, text="Quick Filters:", font=("Arial", 10, "bold")).grid(
+        row=0, column=0, sticky=tk.W
+    )
+    filter_responded_var = tk.BooleanVar(value=False)
+    filter_converted_var = tk.BooleanVar(value=False)
+
+    ttk.Checkbutton(
+        filter_frame,
+        text="Responded",
+        variable=filter_responded_var,
+        command=lambda: apply_filters(focus=False),
+    ).grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+
+    ttk.Checkbutton(
+        filter_frame,
+        text="Converted Clients",
+        variable=filter_converted_var,
+        command=lambda: apply_filters(focus=False),
+    ).grid(row=0, column=2, sticky=tk.W, padx=(10, 0))
+
+    def reset_quick_filters():
+        if filter_responded_var.get() or filter_converted_var.get():
+            filter_responded_var.set(False)
+            filter_converted_var.set(False)
+            apply_filters(focus=True)
+
+    ttk.Button(filter_frame, text="Clear Filters", command=reset_quick_filters).grid(
+        row=0, column=3, sticky=tk.E
+    )
+
     columns = (
         "name",
         "email",
@@ -420,7 +454,7 @@ def open_customer_manager():
     }
 
     tree = ttk.Treeview(container, columns=columns, show="headings", height=12)
-    tree.grid(row=1, column=0, columnspan=4, sticky="nsew")
+    tree.grid(row=2, column=0, columnspan=4, sticky="nsew")
 
     for column in columns:
         tree.heading(column, text=headings[column])
@@ -428,12 +462,10 @@ def open_customer_manager():
         width = 180 if column == "name" else 150
         tree.column(column, width=width, anchor=anchor)
 
-    scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=tree.yview)
-    tree.configure(yscrollcommand=scrollbar.set)
-    scrollbar.grid(row=1, column=4, sticky="ns")
+    scrollbar.grid(row=2, column=4, sticky="ns")
 
     report_options_frame = ttk.LabelFrame(container, text="Report Filters", padding="15")
-    report_options_frame.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    report_options_frame.grid(row=3, column=0, columnspan=5, sticky="ew", pady=(15, 0))
 
     include_prospects_var = tk.BooleanVar(value=True)
     include_responded_var = tk.BooleanVar(value=True)
@@ -464,7 +496,7 @@ def open_customer_manager():
     ).grid(row=1, column=0, columnspan=4, sticky=tk.E, pady=(10, 0))
 
     form_frame = ttk.LabelFrame(container, text="Customer Details", padding="15")
-    form_frame.grid(row=3, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    form_frame.grid(row=4, column=0, columnspan=5, sticky="ew", pady=(15, 0))
     for index in range(4):
         form_frame.columnconfigure(index, weight=1)
 
@@ -555,10 +587,12 @@ def open_customer_manager():
         search_entry.focus_set()
         clear_suggestions()
 
-    def apply_filters():
+    def apply_filters(*, focus: bool = False):
         query = search_var.get().strip().lower()
         tree.delete(*tree.get_children())
         dataset = customer_rows if current_search_matches is None else current_search_matches
+        responded_only = filter_responded_var.get()
+        converted_only = filter_converted_var.get()
         for index, customer in enumerate(dataset):
             searchable = " ".join(
                 [
@@ -569,6 +603,16 @@ def open_customer_manager():
             ).lower()
             if current_search_matches is None and query and query not in searchable:
                 continue
+            responded_flag = bool(customer.get("responded"))
+            converted_flag = bool(customer.get("converted"))
+            if responded_only or converted_only:
+                include_row = False
+                if responded_only and responded_flag:
+                    include_row = True
+                if converted_only and converted_flag:
+                    include_row = True
+                if not include_row:
+                    continue
             try:
                 premium_value = float(customer.get("premium") or 0)
             except (TypeError, ValueError):
@@ -615,7 +659,7 @@ def open_customer_manager():
             }
         )
         current_search_matches = None
-        apply_filters()
+        apply_filters(focus=True)
 
         update_suggestion_box(search_var.get().strip())
 
@@ -752,7 +796,7 @@ def open_customer_manager():
 
         report_popup = tk.Toplevel(customer_window)
         report_popup.title("Customer Engagement Report")
-        report_popup.geometry("520x420")
+
         report_popup.configure(bg="#f0f4f8")
         report_popup.transient(customer_window)
         report_popup.grab_set()
@@ -912,33 +956,8 @@ def open_customer_manager():
 
         cost_entry.bind("<Return>", calculate_roi)
         units_entry.bind("<Return>", calculate_roi)
-        breakdown = metrics.get("status_breakdown", {})
-        breakdown_frame = ttk.LabelFrame(content, text="Premium by Status", padding="10")
-        breakdown_frame.pack(fill=tk.X)
-        status_labels = {
-            "prospects": "Prospects (no response yet)",
-            "responded": "Responded", 
-            "converted": "Converted Clients",
-        }
-        for idx, key in enumerate(["prospects", "responded", "converted"]):
-            data = breakdown.get(key, {})
-            ttk.Label(
-                breakdown_frame,
-                text=status_labels[key] + ":",
-                font=("Arial", 11, "bold"),
-            ).grid(row=idx, column=0, sticky=tk.W, pady=3)
-            summary_text = (
-                f"Count: {data.get('total_customers', 0)}  |  "
-                f"Premium: ${data.get('total_premium', 0.0):,.2f}  |  "
-                f"Response Rate: {data.get('response_rate', 0.0):.1f}%"
-            )
-            ttk.Label(
-                breakdown_frame,
-                text=summary_text,
-                font=("Arial", 10),
-            ).grid(row=idx, column=1, sticky=tk.W, pady=3)
-    button_frame = ttk.Frame(container, padding="5")
-    button_frame.grid(row=4, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+        button_frame = ttk.Frame(container, padding="5")
+        button_frame.grid(row=5, column=0, columnspan=5, sticky="ew", pady=(15, 0))
     for index in range(3):
         button_frame.columnconfigure(index, weight=1)
 

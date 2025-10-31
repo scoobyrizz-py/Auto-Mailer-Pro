@@ -28,7 +28,7 @@ import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Dict, Iterable, List, Mapping
 
 import pandas as pd
 
@@ -346,7 +346,28 @@ CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
 def _initialize_campaign_db(connection: sqlite3.Connection) -> None:
     """Ensure the SQLite database has the table for campaign contacts."""
-    
+
+CUSTOMERS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    premium REAL DEFAULT 0,
+    home_price REAL DEFAULT 0,
+    responded INTEGER DEFAULT 0,
+    converted INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
+
+def _ensure_customers_table(connection: sqlite3.Connection) -> None:
+    """Create the customers table if it is missing."""
+
+    cursor = connection.cursor()
+    cursor.execute(CUSTOMERS_TABLE_SQL)    
     _ensure_campaign_history_schema(connection)
 
 
@@ -485,6 +506,130 @@ def append_campaign_history(campaign_id, mode, crm_rows):
         print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_FILE}")
     except sqlite3.Error as error:
         print(f"⚠️ Failed to log campaign history: {error}")
+
+def _prepare_customer_database(connection: sqlite3.Connection) -> None:
+    """Ensure the campaign and customer tables exist for shared reporting."""
+
+    _initialize_campaign_db(connection)
+    _ensure_customers_table(connection)
+
+
+def _to_float(value: object) -> float:
+    """Safely convert arbitrary values to floats, returning 0.0 on failure."""
+
+    if value in (None, ""):
+        return 0.0
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def list_customers() -> List[Dict[str, object]]:
+    """Return all stored customers for display in the GUI."""
+
+    WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
+        connection.row_factory = sqlite3.Row
+        _prepare_customer_database(connection)
+        cursor = connection.execute(
+            """
+            SELECT id, name, email, phone, premium, home_price, responded, converted,
+                   created_at, updated_at
+            FROM customers
+            ORDER BY name COLLATE NOCASE
+            """
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
+def save_customer(customer: Mapping[str, object]) -> int:
+    """Insert or update a customer record in the database."""
+
+    name = str(customer.get("name", "")).strip()
+    if not name:
+        raise ValueError("Customer name is required")
+
+    email = str(customer.get("email", "")).strip() or None
+    phone = str(customer.get("phone", "")).strip() or None
+    premium = _to_float(customer.get("premium"))
+    home_price = _to_float(customer.get("home_price"))
+    responded = 1 if customer.get("responded") else 0
+    converted = 1 if customer.get("converted") else 0
+    customer_id = customer.get("id")
+
+    WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
+        _prepare_customer_database(connection)
+        cursor = connection.cursor()
+
+        if customer_id:
+            cursor.execute(
+                """
+                UPDATE customers
+                SET name = ?,
+                    email = ?,
+                    phone = ?,
+                    premium = ?,
+                    home_price = ?,
+                    responded = ?,
+                    converted = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (name, email, phone, premium, home_price, responded, converted, customer_id),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Customer not found")
+            connection.commit()
+            return int(customer_id)
+
+        cursor.execute(
+            """
+            INSERT INTO customers (name, email, phone, premium, home_price, responded, converted)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (name, email, phone, premium, home_price, responded, converted),
+        )
+        connection.commit()
+        return int(cursor.lastrowid)
+
+
+def get_customer_metrics() -> Dict[str, float]:
+    """Calculate aggregate metrics used by the reporting window."""
+
+    customers = list_customers()
+    total_customers = len(customers)
+    responded_count = sum(1 for customer in customers if customer.get("responded"))
+    converted_count = sum(1 for customer in customers if customer.get("converted"))
+
+    response_rate = (responded_count / total_customers * 100) if total_customers else 0.0
+    conversion_rate = (converted_count / total_customers * 100) if total_customers else 0.0
+
+    home_prices = [
+        _to_float(customer.get("home_price"))
+        for customer in customers
+        if _to_float(customer.get("home_price")) > 0
+    ]
+    average_home_price = sum(home_prices) / len(home_prices) if home_prices else 0.0
+
+    premiums = [
+        _to_float(customer.get("premium"))
+        for customer in customers
+        if _to_float(customer.get("premium")) > 0
+    ]
+    average_premium = sum(premiums) / len(premiums) if premiums else 0.0
+
+    return {
+        "total_customers": total_customers,
+        "responded_count": responded_count,
+        "converted_count": converted_count,
+        "response_rate": response_rate,
+        "conversion_rate": conversion_rate,
+        "average_home_price": average_home_price,
+        "average_premium": average_premium,
+    }
+
 
 
 

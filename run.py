@@ -254,6 +254,281 @@ LETTER_TEMPLATES = {
 
 custom_content_cache = ""
 current_template_selection = None
+customer_window = None
+
+
+def open_customer_manager():
+    """Display a window for managing customers and viewing reports."""
+
+    global customer_window
+    if customer_window and tk.Toplevel.winfo_exists(customer_window):
+        customer_window.deiconify()
+        customer_window.lift()
+        customer_window.focus_force()
+        return
+
+    customer_window = tk.Toplevel(root)
+    customer_window.title("Customer Database & Reports")
+    customer_window.geometry("950x620")
+    customer_window.configure(bg="#f0f4f8")
+
+    container = ttk.Frame(customer_window, padding="20")
+    container.pack(fill=tk.BOTH, expand=True)
+    container.columnconfigure(0, weight=1)
+    container.rowconfigure(0, weight=1)
+
+    columns = (
+        "name",
+        "email",
+        "phone",
+        "premium",
+        "home_price",
+        "responded",
+        "converted",
+    )
+    headings = {
+        "name": "Name",
+        "email": "Email",
+        "phone": "Phone",
+        "premium": "Premium",
+        "home_price": "Home Price",
+        "responded": "Responded",
+        "converted": "Converted",
+    }
+
+    tree = ttk.Treeview(container, columns=columns, show="headings", height=10)
+    tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
+
+    for column in columns:
+        tree.heading(column, text=headings[column])
+        anchor = tk.W if column not in {"premium", "home_price"} else tk.E
+        width = 160 if column == "name" else 130
+        tree.column(column, width=width, anchor=anchor)
+
+    scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=tree.yview)
+    tree.configure(yscrollcommand=scrollbar.set)
+    scrollbar.grid(row=0, column=4, sticky="ns")
+
+    form_frame = ttk.LabelFrame(container, text="Customer Details", padding="15")
+    form_frame.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    for index in range(4):
+        form_frame.columnconfigure(index, weight=1)
+
+    name_var = tk.StringVar()
+    email_var = tk.StringVar()
+    phone_var = tk.StringVar()
+    premium_var = tk.StringVar()
+    home_price_var = tk.StringVar()
+    responded_var = tk.BooleanVar()
+    converted_var = tk.BooleanVar()
+    selected_customer = {"id": None}
+    customer_rows = []
+
+    ttk.Label(form_frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(form_frame, textvariable=name_var).grid(row=0, column=1, sticky="ew", pady=5)
+
+    ttk.Label(form_frame, text="Email:").grid(row=0, column=2, sticky=tk.W, pady=5)
+    ttk.Entry(form_frame, textvariable=email_var).grid(row=0, column=3, sticky="ew", pady=5)
+
+    ttk.Label(form_frame, text="Phone:").grid(row=1, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(form_frame, textvariable=phone_var).grid(row=1, column=1, sticky="ew", pady=5)
+
+    ttk.Label(form_frame, text="Premium:").grid(row=1, column=2, sticky=tk.W, pady=5)
+    ttk.Entry(form_frame, textvariable=premium_var).grid(row=1, column=3, sticky="ew", pady=5)
+
+    ttk.Label(form_frame, text="Home Price:").grid(row=2, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(form_frame, textvariable=home_price_var).grid(row=2, column=1, sticky="ew", pady=5)
+
+    ttk.Checkbutton(
+        form_frame,
+        text="Customer Responded",
+        variable=responded_var,
+    ).grid(row=2, column=2, sticky=tk.W, pady=5)
+
+    ttk.Checkbutton(
+        form_frame,
+        text="Converted to Policyholder",
+        variable=converted_var,
+    ).grid(row=2, column=3, sticky=tk.W, pady=5)
+
+    def clear_form():
+        name_var.set("")
+        email_var.set("")
+        phone_var.set("")
+        premium_var.set("")
+        home_price_var.set("")
+        responded_var.set(False)
+        converted_var.set(False)
+        selected_customer["id"] = None
+        tree.selection_remove(tree.selection())
+
+    def refresh_tree():
+        nonlocal customer_rows
+        for item in tree.get_children():
+            tree.delete(item)
+        try:
+            customer_rows = AutoMailerPro.list_customers()
+        except Exception as exc:
+            messagebox.showerror("Error", f"Unable to load customers: {exc}")
+            customer_rows = []
+            return
+
+        for customer in customer_rows:
+            try:
+                premium_value = float(customer.get("premium") or 0)
+            except (TypeError, ValueError):
+                premium_value = 0.0
+            try:
+                home_price_value = float(customer.get("home_price") or 0)
+            except (TypeError, ValueError):
+                home_price_value = 0.0
+
+            tree.insert(
+                "",
+                tk.END,
+                iid=str(customer["id"]),
+                values=(
+                    customer.get("name", ""),
+                    customer.get("email", ""),
+                    customer.get("phone", ""),
+                    f"${premium_value:,.2f}",
+                    f"${home_price_value:,.0f}",
+                    "Yes" if customer.get("responded") else "No",
+                    "Yes" if customer.get("converted") else "No",
+                ),
+            )
+
+    def on_select(event):
+        selection = tree.selection()
+        if not selection:
+            return
+        customer_id = selection[0]
+        customer = next(
+            (row for row in customer_rows if str(row.get("id")) == customer_id),
+            None,
+        )
+        if not customer:
+            return
+
+        selected_customer["id"] = customer.get("id")
+        name_var.set(customer.get("name", ""))
+        email_var.set(customer.get("email", ""))
+        phone_var.set(customer.get("phone", ""))
+        premium_var.set(str(customer.get("premium", "") or ""))
+        home_price_var.set(str(customer.get("home_price", "") or ""))
+        responded_var.set(bool(customer.get("responded")))
+        converted_var.set(bool(customer.get("converted")))
+
+    def save_selected_customer():
+        payload = {
+            "id": selected_customer.get("id"),
+            "name": name_var.get().strip(),
+            "email": email_var.get().strip(),
+            "phone": phone_var.get().strip(),
+            "premium": premium_var.get().strip(),
+            "home_price": home_price_var.get().strip(),
+            "responded": responded_var.get(),
+            "converted": converted_var.get(),
+        }
+        try:
+            saved_id = AutoMailerPro.save_customer(payload)
+        except ValueError as exc:
+            messagebox.showerror("Validation Error", str(exc))
+            return
+        except Exception as exc:
+            messagebox.showerror("Error", f"Unable to save customer: {exc}")
+            return
+
+        action = "updated" if payload.get("id") else "added"
+        messagebox.showinfo("Success", f"Customer {action} successfully.")
+        selected_customer["id"] = saved_id
+        refresh_tree()
+        clear_form()
+
+    def show_report():
+        try:
+            metrics = AutoMailerPro.get_customer_metrics()
+        except Exception as exc:
+            messagebox.showerror("Error", f"Unable to generate report: {exc}")
+            return
+
+        report_popup = tk.Toplevel(customer_window)
+        report_popup.title("Customer Engagement Report")
+        report_popup.geometry("400x260")
+        report_popup.configure(bg="#f0f4f8")
+        report_popup.transient(customer_window)
+        report_popup.grab_set()
+        report_popup.focus_set()
+
+        ttk.Label(
+            report_popup,
+            text="Customer Engagement Summary",
+            font=("Arial", 14, "bold"),
+            padding=10,
+        ).pack()
+
+        content = ttk.Frame(report_popup, padding="10")
+        content.pack(fill=tk.BOTH, expand=True)
+        stats = [
+            ("Total Customers", metrics.get("total_customers", 0)),
+            (
+                "Responses",
+                f"{metrics.get('responded_count', 0)} ({metrics.get('response_rate', 0.0):.1f}%)",
+            ),
+            (
+                "Conversions",
+                f"{metrics.get('converted_count', 0)} ({metrics.get('conversion_rate', 0.0):.1f}%)",
+            ),
+            (
+                "Average Premium",
+                f"${metrics.get('average_premium', 0.0):,.2f}",
+            ),
+            (
+                "Average Home Price",
+                f"${metrics.get('average_home_price', 0.0):,.0f}",
+            ),
+        ]
+
+        for idx, (label, value) in enumerate(stats):
+            ttk.Label(content, text=label + ":", font=("Arial", 11, "bold")).grid(
+                row=idx, column=0, sticky=tk.W, pady=5
+            )
+            ttk.Label(content, text=value, font=("Arial", 11)).grid(
+                row=idx, column=1, sticky=tk.W, pady=5
+            )
+
+    button_frame = ttk.Frame(container, padding="5")
+    button_frame.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    button_frame.columnconfigure(0, weight=1)
+    button_frame.columnconfigure(1, weight=1)
+    button_frame.columnconfigure(2, weight=1)
+
+    ttk.Button(button_frame, text="Save Customer", command=save_selected_customer).grid(
+        row=0, column=0, sticky="ew", padx=5
+    )
+    ttk.Button(button_frame, text="Clear", command=clear_form).grid(
+        row=0, column=1, sticky="ew", padx=5
+    )
+    ttk.Button(button_frame, text="Show Report", command=show_report).grid(
+        row=0, column=2, sticky="ew", padx=5
+    )
+
+    tree.bind("<<TreeviewSelect>>", on_select)
+
+    def on_close():
+        nonlocal customer_rows
+        global customer_window
+        customer_rows = []
+        clear_form()
+        if customer_window is not None:
+            window_to_close = customer_window
+            customer_window = None
+            window_to_close.destroy()
+
+    customer_window.protocol("WM_DELETE_WINDOW", on_close)
+
+    refresh_tree()
+
 
 # Signature selection
 signature_label = tk.Label(main_frame, text="Signature:", font=("Arial", 12), bg="#f0f4f8")
@@ -305,20 +580,28 @@ letter_text = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("
 letter_text.grid(row=7, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 template_var.trace_add("write", lambda *args: apply_template_selection())
 apply_template_selection()
+# Customer manager button
+customer_manager_button = ttk.Button(
+    main_frame,
+    text="Customer Database & Reports",
+    command=open_customer_manager,
+    style="TButton",
+)
+customer_manager_button.grid(row=8, column=0, columnspan=4, pady=(15, 5))
 
 # Run button
 run_button = ttk.Button(main_frame, text="Run Campaign", command=run_campaign, style="TButton")
-run_button.grid(row=8, column=0, columnspan=4, pady=20)
+run_button.grid(row=9, column=0, columnspan=4, pady=20)
 
 # Progress bar
 progress_bar = ttk.Progressbar(main_frame, mode='indeterminate')
-progress_bar.grid(row=9, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+progress_bar.grid(row=10, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 
 # Output text
 output_label = tk.Label(main_frame, text="Output:", font=("Arial", 12), bg="#f0f4f8")
-output_label.grid(row=10, column=0, sticky=tk.W, pady=5)
+output_label.grid(row=11, column=0, sticky=tk.W, pady=5)
 output_text = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("Arial", 10), bg="white", fg="black")
-output_text.grid(row=11, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+output_text.grid(row=12, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 
 # Redirect print output to GUI
 sys.stdout = StdoutRedirector(output_text)
@@ -331,7 +614,7 @@ credits_label = tk.Label(
     font=("Arial", 10),
     bg="#f0f4f8"
 )
-credits_label.grid(row=12, column=0, columnspan=4, pady=20)
+credits_label.grid(row=13, column=0, columnspan=4, pady=20)
 
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)

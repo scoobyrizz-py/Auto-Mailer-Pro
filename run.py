@@ -837,6 +837,81 @@ def open_customer_manager():
             ttk.Label(filtered_frame, text=value, font=("Arial", 11)).grid(
                 row=idx, column=1, sticky=tk.W, pady=3
             )
+        roi_frame = ttk.LabelFrame(content, text="Campaign ROI", padding="10")
+        roi_frame.pack(fill=tk.X, pady=(0, 10))
+
+        cost_var = tk.StringVar()
+        units_default = filtered.get("total_customers") or metrics.get("total_customers", 0)
+        units_var = tk.StringVar(value=str(units_default))
+
+        ttk.Label(roi_frame, text="Cost per Mail Unit ($):", font=("Arial", 11, "bold")).grid(
+            row=0, column=0, sticky=tk.W, pady=3
+        )
+        cost_entry = ttk.Entry(roi_frame, textvariable=cost_var, width=18)
+        cost_entry.grid(row=0, column=1, sticky=tk.W, pady=3)
+
+        ttk.Label(roi_frame, text="Mail Units Sent:", font=("Arial", 11, "bold")).grid(
+            row=1, column=0, sticky=tk.W, pady=3
+        )
+        units_entry = ttk.Entry(roi_frame, textvariable=units_var, width=18)
+        units_entry.grid(row=1, column=1, sticky=tk.W, pady=3)
+
+        roi_summary_var = tk.StringVar(
+            value="Enter a unit cost and mail count, then click Calculate ROI."
+        )
+
+        def calculate_roi(*_):
+            cost_input = cost_var.get().strip()
+            units_input = units_var.get().strip()
+
+            if not cost_input or not units_input:
+                roi_summary_var.set(
+                    "Provide both the cost per unit and mail units to estimate ROI."
+                )
+                return
+
+            try:
+                cost_value = float(cost_input)
+                units_value = float(units_input)
+            except ValueError:
+                roi_summary_var.set(
+                    "Cost per unit and mail units must be numeric values."
+                )
+                return
+
+            if cost_value < 0 or units_value < 0:
+                roi_summary_var.set(
+                    "Cost per unit and mail units must be non-negative numbers."
+                )
+                return
+
+            total_cost = cost_value * units_value
+            revenue = filtered.get("total_premium", 0.0)
+
+            if total_cost == 0:
+                roi_summary_var.set(
+                    f"Total Cost: ${total_cost:,.2f}  |  Revenue: ${revenue:,.2f}  |  ROI: n/a"
+                )
+                return
+
+            net = revenue - total_cost
+            roi_percent = (net / total_cost) * 100
+            roi_summary_var.set(
+                (
+                    f"Total Cost: ${total_cost:,.2f}  |  Revenue: ${revenue:,.2f}  |  "
+                    f"Net: ${net:,.2f}  |  ROI: {roi_percent:.1f}%"
+                )
+            )
+
+        ttk.Button(roi_frame, text="Calculate ROI", command=calculate_roi).grid(
+            row=2, column=0, columnspan=2, pady=(6, 3), sticky=tk.W
+        )
+        ttk.Label(
+            roi_frame, textvariable=roi_summary_var, font=("Arial", 10), wraplength=460
+        ).grid(row=3, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+
+        cost_entry.bind("<Return>", calculate_roi)
+        units_entry.bind("<Return>", calculate_roi)
         breakdown = metrics.get("status_breakdown", {})
         breakdown_frame = ttk.LabelFrame(content, text="Premium by Status", padding="10")
         breakdown_frame.pack(fill=tk.X)

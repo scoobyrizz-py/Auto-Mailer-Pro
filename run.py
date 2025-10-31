@@ -391,6 +391,15 @@ def open_customer_manager():
         text="Type a first name to auto-complete matching contacts.",
         font=("Arial", 9),
     ).grid(row=1, column=0, columnspan=2, sticky=tk.W)
+    suggestion_var = tk.StringVar(value=())
+    suggestion_listbox = tk.Listbox(
+        search_frame,
+        listvariable=suggestion_var,
+        height=5,
+        exportselection=False,
+    )
+    suggestion_listbox.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(4, 0))
+    suggestion_listbox.grid_remove()
     columns = (
         "name",
         "email",
@@ -471,7 +480,7 @@ def open_customer_manager():
     name_index: list = []
     current_search_matches: Optional[List[Dict[str, object]]] = None
     search_trace_id = None
-
+    suggestions_suppressed = False
     ttk.Label(form_frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
     ttk.Entry(form_frame, textvariable=name_var).grid(row=0, column=1, sticky="ew", pady=5)
 
@@ -510,11 +519,38 @@ def open_customer_manager():
         selected_customer["id"] = None
         tree.selection_remove(tree.selection())
 
+    def clear_suggestions():
+        suggestion_var.set(())
+        suggestion_listbox.selection_clear(0, tk.END)
+        suggestion_listbox.grid_remove()
+
+    def update_suggestion_box(prefix: str):
+        nonlocal suggestions_suppressed
+        if suggestions_suppressed:
+            return
+        if not prefix:
+            clear_suggestions()
+            return
+        lowered = prefix.lower()
+        matches = [
+            candidate
+            for candidate in name_index
+            if candidate.lower().startswith(lowered)
+        ][:8]
+        if matches:
+            suggestion_var.set(matches)
+            suggestion_listbox.grid()
+            suggestion_listbox.selection_clear(0, tk.END)
+        else:
+            clear_suggestions()
+
+
     def clear_search():
         nonlocal current_search_matches
         current_search_matches = None
         search_var.set("")
         search_entry.focus_set()
+        clear_suggestions()
 
     def apply_filters():
         query = search_var.get().strip().lower()
@@ -575,22 +611,7 @@ def open_customer_manager():
         current_search_matches = None
         apply_filters()
 
-    def autocomplete_search(event):
-        if event.keysym in {"BackSpace", "Delete", "Left", "Right", "Up", "Down"}:
-            return
-        current_value = search_var.get().strip()
-        if not current_value:
-            return
-        matches = [
-            candidate for candidate in name_index if candidate.lower().startswith(current_value.lower())
-        ]
-        if not matches:
-            return
-        suggestion = matches[0]
-        search_entry.delete(0, tk.END)
-        search_entry.insert(0, suggestion)
-        search_entry.select_range(len(current_value), tk.END)
-        search_entry.icursor(len(current_value))
+        update_suggestion_box(search_var.get().strip())
 
     def focus_first_result(event=None):
         items = tree.get_children()
@@ -602,7 +623,49 @@ def open_customer_manager():
         tree.see(first)
         on_select(None)
 
-    search_entry.bind("<KeyRelease>", autocomplete_search)
+    def use_suggestion(event=None):
+        nonlocal suggestions_suppressed
+        selection = suggestion_listbox.curselection()
+        if not selection:
+            return "break"
+        choice = suggestion_listbox.get(selection[0])
+        suggestions_suppressed = True
+        try:
+            search_var.set(choice)
+        finally:
+            suggestions_suppressed = False
+        suggestion_listbox.selection_clear(0, tk.END)
+        suggestion_listbox.grid_remove()
+        search_entry.focus_set()
+        focus_first_result()
+        return "break"
+
+    def handle_search_key(event):
+        if event.keysym == "Down" and suggestion_listbox.winfo_ismapped():
+            suggestion_listbox.focus_set()
+            if suggestion_listbox.size():
+                suggestion_listbox.selection_set(0)
+            return "break"
+        if event.keysym == "Escape":
+            clear_suggestions()
+        return None
+
+    def handle_suggestion_navigation(event):
+        if event.keysym == "Escape":
+            clear_suggestions()
+            search_entry.focus_set()
+            return "break"
+        if event.keysym == "Up" and suggestion_listbox.curselection() == (0,):
+            suggestion_listbox.selection_clear(0, tk.END)
+            search_entry.focus_set()
+            return "break"
+        return None
+
+    search_entry.bind("<KeyRelease>", handle_search_key)
+    suggestion_listbox.bind("<Double-Button-1>", use_suggestion)
+    suggestion_listbox.bind("<Return>", use_suggestion)
+    suggestion_listbox.bind("<KP_Enter>", use_suggestion)
+    suggestion_listbox.bind("<KeyRelease>", handle_suggestion_navigation)
 
     def on_select(event):
         selection = tree.selection()
@@ -807,6 +870,7 @@ def open_customer_manager():
             search_var.trace_remove("write", search_trace_id)
             search_trace_id = None
         clear_form()
+        clear_suggestions()
         if customer_window is not None:
             window_to_close = customer_window
             customer_window = None
@@ -816,6 +880,7 @@ def open_customer_manager():
     def perform_search(event=None):
         nonlocal current_search_matches
         query = search_var.get().strip()
+        clear_suggestions()
         if not query:
             current_search_matches = None
             apply_filters()
@@ -859,6 +924,7 @@ def open_customer_manager():
         if current_search_matches is not None:
             current_search_matches = None
         apply_filters()
+        update_suggestion_box(search_var.get().strip())
 
     search_trace_id = search_var.trace_add("write", watch_search)
 

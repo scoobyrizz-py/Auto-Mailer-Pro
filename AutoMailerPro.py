@@ -227,10 +227,26 @@ SIGNATURES_DIR = ASSETS_DIR / "signatures"
 
 
 def get_user_data_dir(app_name: str = "AutoMailerPro") -> Path:
-    """Return a user-writable folder for persistent application data."""
+    """Return the canonical user-writable folder for persistent application data.
+
+    The location intentionally mirrors the directory that will be used once the
+    project is packaged with PyInstaller so that both ``python`` and ``.exe``
+    executions touch the same on-disk state.  On Windows we force everything
+    into ``%LOCALAPPDATA%`` (falling back to ``%APPDATA%`` or a sensible default
+    under the user's profile when necessary).  macOS and Linux receive
+    equivalent canonical folders within the standard application-support
+    locations.
+    """
 
     if sys.platform.startswith("win"):
-        base_dir = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or Path.home())
+        # Prefer LOCALAPPDATA so that PyInstaller builds and source checkouts
+        # always agree on the SQLite database location.
+        local_app_data = (
+            os.environ.get("LOCALAPPDATA")
+            or os.environ.get("APPDATA")
+            or Path.home() / "AppData" / "Local"
+        )
+        base_dir = Path(local_app_data)
     elif sys.platform == "darwin":
         base_dir = Path.home() / "Library" / "Application Support"
     else:
@@ -240,6 +256,9 @@ def get_user_data_dir(app_name: str = "AutoMailerPro") -> Path:
 
 
 WRITABLE_DATA_DIR = get_user_data_dir()
+# Ensure the canonical directory exists immediately so any subsequent imports
+# or log statements can rely on it without racing file creation.
+WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
 OUTPUT_ROOT = WRITABLE_DATA_DIR / "output"
 CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
@@ -895,7 +914,7 @@ def save_customer(customer: Mapping[str, object]) -> int:
         )
         connection.commit()
         return int(cursor.lastrowid)
-        
+
 def _compute_group_metrics(customers: Iterable[Mapping[str, object]]) -> Dict[str, float]:
     records = list(customers)
     total_customers = len(records)

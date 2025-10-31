@@ -150,14 +150,13 @@ If you need to refresh the packaged application or customize it with your own as
  | `all_envelopes.docx` | #10 envelope layout, one per recipient. |
  | `mailing_labels.docx` | Avery 5160-compatible 3×10 sheet of labels. |
  | `crm_<mode>_occupied.csv` | Filtered and cleaned contact list for CRM import. |
- | `data/campaign_history.db` | Consolidated log of every contact mailed, updated after each run. |
+| `%LOCALAPPDATA%/AutoMailerPro/campaign_history.db`<br/>`~/Library/Application Support/AutoMailerPro/campaign_history.db` (macOS)<br/>`~/.local/share/AutoMailerPro/campaign_history.db` (Linux) | Consolidated log of every contact mailed, updated after each run. |
  | `processing_log.txt` *(optional)* | Console output when redirected via GUI (copy from output panel if needed). |
 ---
 
 ## 📊 Campaign History Database
 
-Every successful campaign automatically appends its CRM-ready rows to the SQLite file at `data/campaign_history.db`. The `campaign_contacts` table includes the campaign folder name (`campaign_id`), mode, send timestamp, and the cleaned contact fields. Connect the database to Excel, Google Data Studio, Metabase, or any BI tool to blend in response/conversion outcomes without manually merging CSV exports.
-
+Every successful campaign automatically appends its CRM-ready rows to the SQLite file stored in your user profile (`%LOCALAPPDATA%/AutoMailerPro/campaign_history.db` on Windows, `~/Library/Application Support/AutoMailerPro/campaign_history.db` on macOS, or `~/.local/share/AutoMailerPro/campaign_history.db` on Linux). The `campaign_contacts` table includes the campaign folder name (`campaign_id`), mode, send timestamp, and the cleaned contact fields. Connect the database to Excel, Google Data Studio, Metabase, or any BI tool to blend in response/conversion outcomes without manually merging CSV exports.
 ---
 
 ## 🛠 Configuration & Customization

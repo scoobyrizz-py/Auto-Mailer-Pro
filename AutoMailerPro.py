@@ -24,10 +24,12 @@ __contact__ = "scooby_rizz@proton.me"
 
 import os
 import re
+import shutil
 import sqlite3
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Optional
 from typing import Dict, Iterable, List, Mapping
 
 import pandas as pd
@@ -222,8 +224,24 @@ BASE_DIR = get_resource_dir()
 DATA_DIR = BASE_DIR / "data"
 ASSETS_DIR = BASE_DIR / "assets"
 SIGNATURES_DIR = ASSETS_DIR / "signatures"
-OUTPUT_ROOT = Path.cwd() / "output"
-CAMPAIGN_DB_FILE = DATA_DIR / "campaign_history.db"
+
+
+def get_user_data_dir(app_name: str = "AutoMailerPro") -> Path:
+    """Return a user-writable folder for persistent application data."""
+
+    if sys.platform.startswith("win"):
+        base_dir = Path(os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or Path.home())
+    elif sys.platform == "darwin":
+        base_dir = Path.home() / "Library" / "Application Support"
+    else:
+        base_dir = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+
+    return base_dir / app_name
+
+
+WRITABLE_DATA_DIR = get_user_data_dir()
+OUTPUT_ROOT = WRITABLE_DATA_DIR / "output"
+CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
 
 CAMPAIGN_CONTACTS_COLUMNS = (
@@ -340,12 +358,28 @@ def _ensure_campaign_history_schema(connection):
 
     if not expected_columns.issubset(set(existing_columns)):
         _rebuild_campaign_contacts_table(connection)
-WRITABLE_DATA_DIR = Path.cwd() / "data"
-CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
 
 def _initialize_campaign_db(connection: sqlite3.Connection) -> None:
     """Ensure the SQLite database has the table for campaign contacts."""
+def ensure_local_database() -> Path:
+    """Create or hydrate the writable SQLite database in the user data directory."""
+
+    WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    if not CAMPAIGN_DB_PATH.exists():
+        packaged_db = DATA_DIR / "campaign_history.db"
+        try:
+            if packaged_db.exists():
+                CAMPAIGN_DB_PATH.write_bytes(packaged_db.read_bytes())
+            else:
+                with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
+                    _initialize_campaign_db(connection)
+        except OSError as exc:
+            raise RuntimeError(f"Unable to prepare local database: {exc}") from exc
+
+    return CAMPAIGN_DB_PATH
+
 
 CUSTOMERS_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS customers (
@@ -385,7 +419,7 @@ def _append_campaign_records(
         return
 
     WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
-
+    ensure_local_database()
     sent_at_iso = sent_at.isoformat(timespec="seconds")
     try:
         with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
@@ -470,7 +504,7 @@ def append_campaign_history(campaign_id, mode, crm_rows):
     if not crm_rows:
         return
 
-    CAMPAIGN_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ensure_local_database()
 
     sent_at = datetime.utcnow().isoformat(timespec="seconds")
     rows_to_insert = []
@@ -498,12 +532,12 @@ def append_campaign_history(campaign_id, mode, crm_rows):
         )
 
     try:
-        with sqlite3.connect(CAMPAIGN_DB_FILE) as connection:
+        with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
             _ensure_campaign_history_schema(connection)
             cursor = connection.cursor()
             cursor.executemany(CAMPAIGN_CONTACTS_INSERT_SQL, rows_to_insert)
             connection.commit()
-        print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_FILE}")
+        print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_PATH}")
     except sqlite3.Error as error:
         print(f"⚠️ Failed to log campaign history: {error}")
 
@@ -559,6 +593,7 @@ def save_customer(customer: Mapping[str, object]) -> int:
     customer_id = customer.get("id")
 
     WRITABLE_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    ensure_local_database()
     with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
         _prepare_customer_database(connection)
         cursor = connection.cursor()
@@ -595,31 +630,40 @@ def save_customer(customer: Mapping[str, object]) -> int:
         return int(cursor.lastrowid)
 
 
-def get_customer_metrics() -> Dict[str, float]:
-    """Calculate aggregate metrics used by the reporting window."""
-
-    customers = list_customers()
-    total_customers = len(customers)
-    responded_count = sum(1 for customer in customers if customer.get("responded"))
-    converted_count = sum(1 for customer in customers if customer.get("converted"))
+def _compute_group_metrics(customers: Iterable[Mapping[str, object]]) -> Dict[str, float]:
+    records = list(customers)
+    total_customers = len(records)
+    responded_count = sum(1 for customer in records if customer.get("responded"))
+    converted_count = sum(1 for customer in records if customer.get("converted"))
 
     response_rate = (responded_count / total_customers * 100) if total_customers else 0.0
     conversion_rate = (converted_count / total_customers * 100) if total_customers else 0.0
 
     home_prices = [
         _to_float(customer.get("home_price"))
-        for customer in customers
+        for customer in records
         if _to_float(customer.get("home_price")) > 0
     ]
     average_home_price = sum(home_prices) / len(home_prices) if home_prices else 0.0
 
     premiums = [
         _to_float(customer.get("premium"))
-        for customer in customers
+        for customer in records
         if _to_float(customer.get("premium")) > 0
     ]
     average_premium = sum(premiums) / len(premiums) if premiums else 0.0
-
+    total_premium = sum(premiums)
+    responded_premium = sum(
+        _to_float(customer.get("premium")) for customer in records if customer.get("responded")
+    )
+    converted_premium = sum(
+        _to_float(customer.get("premium")) for customer in records if customer.get("converted")
+    )
+    prospect_premium = sum(
+        _to_float(customer.get("premium"))
+        for customer in records
+        if not customer.get("responded")
+    )
     return {
         "total_customers": total_customers,
         "responded_count": responded_count,
@@ -628,6 +672,66 @@ def get_customer_metrics() -> Dict[str, float]:
         "conversion_rate": conversion_rate,
         "average_home_price": average_home_price,
         "average_premium": average_premium,
+                "total_premium": total_premium,
+        "responded_premium": responded_premium,
+        "converted_premium": converted_premium,
+        "prospect_premium": prospect_premium,
+    }
+
+
+def get_customer_metrics(filters: Optional[Mapping[str, bool]] = None) -> Dict[str, object]:
+    """Calculate aggregate metrics used by the reporting window."""
+
+    customers = list_customers()
+    overall_metrics = _compute_group_metrics(customers)
+
+    filters = filters or {}
+    include_prospects = filters.get("include_prospects", True)
+    include_responded = filters.get("include_responded", True)
+    include_converted = filters.get("include_converted", True)
+
+    status_groups = {
+        "prospect": [],
+        "responded": [],
+        "converted": [],
+    }
+
+    for customer in customers:
+        if customer.get("converted"):
+            status_groups["converted"].append(customer)
+        elif customer.get("responded"):
+            status_groups["responded"].append(customer)
+        else:
+            status_groups["prospect"].append(customer)
+
+    allowed_statuses = set()
+    if include_prospects:
+        allowed_statuses.add("prospect")
+    if include_responded:
+        allowed_statuses.add("responded")
+    if include_converted:
+        allowed_statuses.add("converted")
+
+    filtered_customers: List[Mapping[str, object]] = []
+    for status in allowed_statuses:
+        filtered_customers.extend(status_groups[status])
+
+    filtered_metrics = _compute_group_metrics(filtered_customers)
+    status_breakdown = {
+        "prospects": _compute_group_metrics(status_groups["prospect"]),
+        "responded": _compute_group_metrics(status_groups["responded"]),
+        "converted": _compute_group_metrics(status_groups["converted"]),
+    }
+
+    return {
+        **overall_metrics,
+        "filters": {
+            "include_prospects": include_prospects,
+            "include_responded": include_responded,
+            "include_converted": include_converted,
+        },
+        "filtered_totals": filtered_metrics,
+        "status_breakdown": status_breakdown,
     }
 
 
@@ -1011,7 +1115,7 @@ def main(
             sale_date_range_label = f"{oldest_sale.strftime('%m%d%y')}-{newest_sale.strftime('%m%d%y')}"
     run_started_at = datetime.now()
     timestamp = run_started_at.strftime("%m%d%y_%H%M%S")
-    OUTPUT_ROOT.mkdir(exist_ok=True)
+    OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
     if sale_date_range_label:
         folder_name = f"{sale_date_range_label}_{mode.capitalize()}_Mailing_Campaign"
     else:

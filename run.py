@@ -1,4 +1,7 @@
 from pathlib import Path
+import json
+import re
+import shutil
 import sys
 import threading
 
@@ -8,6 +11,7 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, messagebox, filedialog
 from ttkthemes import ThemedTk
 from textwrap import dedent
+from typing import Dict
 
 def get_base_dir() -> Path:
     """Return the directory that holds bundled resources."""
@@ -152,9 +156,8 @@ else:
     logo_label.grid(row=0, column=0, columnspan=4, pady=20)
 
 # Define signature profiles (name, title, image, email)
-signature_profiles = {
-"Brian Jones": (
-        "Brian Jones",
+DEFAULT_SIGNATURE_PROFILES = {
+    "Brian Jones": (
         "Vice President",
         SIGNATURES_DIR / "signature_brian.png",
         "Brian@jonesia.com",
@@ -178,6 +181,95 @@ signature_profiles = {
         "Kris@jonesia.com",
     ),
 }
+CUSTOM_SIGNATURES_DIR = AutoMailerPro.WRITABLE_DATA_DIR / "signatures"
+CUSTOM_SIGNATURES_FILE = AutoMailerPro.WRITABLE_DATA_DIR / "signature_profiles.json"
+
+signature_profiles = dict(DEFAULT_SIGNATURE_PROFILES)
+
+
+def sanitize_filename(label: str) -> str:
+    """Return a filesystem-safe filename derived from ``label``."""
+
+    sanitized = re.sub(r"[^A-Za-z0-9_-]", "_", label.strip())
+    return sanitized or "signature"
+
+
+def load_custom_signatures() -> Dict[str, tuple]:
+    """Load persisted signature profiles from the user data directory."""
+
+    CUSTOM_SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
+    if not CUSTOM_SIGNATURES_FILE.exists():
+        return {}
+
+    try:
+        with CUSTOM_SIGNATURES_FILE.open("r", encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"⚠️ Unable to load custom signatures: {exc}")
+        return {}
+
+    loaded_profiles: Dict[str, tuple] = {}
+    for entry in payload:
+        name = entry.get("name")
+        title = entry.get("title")
+        email = entry.get("email")
+        image_name = entry.get("image")
+        if not name:
+            continue
+        image_path = None
+        if image_name:
+            candidate = Path(image_name)
+            image_path = candidate if candidate.is_absolute() else CUSTOM_SIGNATURES_DIR / candidate
+        loaded_profiles[name] = (
+            name,
+            title or "",
+            image_path,
+            email or "",
+        )
+
+    return loaded_profiles
+
+
+def persist_custom_signatures() -> None:
+    """Write custom signature definitions to disk."""
+
+    entries = []
+    for name, profile in signature_profiles.items():
+        if name in DEFAULT_SIGNATURE_PROFILES:
+            continue
+        _, title, image_path, email = profile
+        relative_image = None
+        if image_path:
+            try:
+                image_path = Path(image_path)
+                if image_path.is_relative_to(CUSTOM_SIGNATURES_DIR):
+                    relative_image = image_path.relative_to(CUSTOM_SIGNATURES_DIR).as_posix()
+                else:
+                    relative_image = image_path.as_posix()
+            except AttributeError:
+                if str(image_path).startswith(str(CUSTOM_SIGNATURES_DIR)):
+                    relative_image = str(image_path)[len(str(CUSTOM_SIGNATURES_DIR)) + 1 :]
+                else:
+                    relative_image = str(image_path)
+
+        entries.append(
+            {
+                "name": name,
+                "title": title,
+                "email": email,
+                "image": relative_image,
+            }
+        )
+
+    try:
+        CUSTOM_SIGNATURES_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with CUSTOM_SIGNATURES_FILE.open("w", encoding="utf-8") as handle:
+            json.dump(entries, handle, indent=2)
+    except OSError as exc:
+        messagebox.showerror("Error", f"Unable to save signature profiles: {exc}")
+
+
+signature_profiles.update(load_custom_signatures())
 
 INDIAN_RIVER_PERSONAL_TEMPLATE = dedent(
     """
@@ -269,14 +361,29 @@ def open_customer_manager():
 
     customer_window = tk.Toplevel(root)
     customer_window.title("Customer Database & Reports")
-    customer_window.geometry("950x620")
+    customer_window.geometry("1020x680")
     customer_window.configure(bg="#f0f4f8")
 
     container = ttk.Frame(customer_window, padding="20")
     container.pack(fill=tk.BOTH, expand=True)
     container.columnconfigure(0, weight=1)
-    container.rowconfigure(0, weight=1)
+    container.rowconfigure(1, weight=1)
 
+    search_frame = ttk.LabelFrame(container, text="Search & Quick Find", padding="15")
+    search_frame.grid(row=0, column=0, columnspan=5, sticky="ew")
+    search_frame.columnconfigure(0, weight=1)
+
+    search_var = tk.StringVar()
+    search_entry = ttk.Entry(search_frame, textvariable=search_var)
+    search_entry.grid(row=0, column=0, sticky="ew", pady=5)
+    ttk.Button(search_frame, text="Clear Search", command=lambda: clear_search()).grid(
+        row=0, column=1, padx=5, pady=5
+    )
+    ttk.Label(
+        search_frame,
+        text="Type a first name to auto-complete matching contacts.",
+        font=("Arial", 9),
+    ).grid(row=1, column=0, columnspan=2, sticky=tk.W)
     columns = (
         "name",
         "email",
@@ -296,21 +403,52 @@ def open_customer_manager():
         "converted": "Converted",
     }
 
-    tree = ttk.Treeview(container, columns=columns, show="headings", height=10)
-    tree.grid(row=0, column=0, columnspan=4, sticky="nsew")
+    tree = ttk.Treeview(container, columns=columns, show="headings", height=12)
+    tree.grid(row=1, column=0, columnspan=4, sticky="nsew")
 
     for column in columns:
         tree.heading(column, text=headings[column])
         anchor = tk.W if column not in {"premium", "home_price"} else tk.E
-        width = 160 if column == "name" else 130
+        width = 180 if column == "name" else 150
         tree.column(column, width=width, anchor=anchor)
 
     scrollbar = ttk.Scrollbar(container, orient=tk.VERTICAL, command=tree.yview)
     tree.configure(yscrollcommand=scrollbar.set)
-    scrollbar.grid(row=0, column=4, sticky="ns")
+    scrollbar.grid(row=1, column=4, sticky="ns")
+
+    report_options_frame = ttk.LabelFrame(container, text="Report Filters", padding="15")
+    report_options_frame.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+
+    include_prospects_var = tk.BooleanVar(value=True)
+    include_responded_var = tk.BooleanVar(value=True)
+    include_converted_var = tk.BooleanVar(value=True)
+
+    ttk.Label(report_options_frame, text="Premium Tracking:").grid(
+        row=0, column=0, sticky=tk.W, pady=5
+    )
+    ttk.Checkbutton(
+        report_options_frame,
+        text="Prospects",
+        variable=include_prospects_var,
+    ).grid(row=0, column=1, sticky=tk.W, padx=5, pady=5)
+    ttk.Checkbutton(
+        report_options_frame,
+        text="Responded",
+        variable=include_responded_var,
+    ).grid(row=0, column=2, sticky=tk.W, padx=5, pady=5)
+    ttk.Checkbutton(
+        report_options_frame,
+        text="Converted Clients",
+        variable=include_converted_var,
+    ).grid(row=0, column=3, sticky=tk.W, padx=5, pady=5)
+    ttk.Button(
+        report_options_frame,
+        text="Generate Report",
+        command=lambda: show_report(),
+    ).grid(row=1, column=0, columnspan=4, sticky=tk.E, pady=(10, 0))
 
     form_frame = ttk.LabelFrame(container, text="Customer Details", padding="15")
-    form_frame.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    form_frame.grid(row=3, column=0, columnspan=5, sticky="ew", pady=(15, 0))
     for index in range(4):
         form_frame.columnconfigure(index, weight=1)
 
@@ -322,7 +460,9 @@ def open_customer_manager():
     responded_var = tk.BooleanVar()
     converted_var = tk.BooleanVar()
     selected_customer = {"id": None}
-    customer_rows = []
+    customer_rows: list = []
+    name_index: list = []
+    search_trace_id = None
 
     ttk.Label(form_frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
     ttk.Entry(form_frame, textvariable=name_var).grid(row=0, column=1, sticky="ew", pady=5)
@@ -362,18 +502,22 @@ def open_customer_manager():
         selected_customer["id"] = None
         tree.selection_remove(tree.selection())
 
-    def refresh_tree():
-        nonlocal customer_rows
-        for item in tree.get_children():
-            tree.delete(item)
-        try:
-            customer_rows = AutoMailerPro.list_customers()
-        except Exception as exc:
-            messagebox.showerror("Error", f"Unable to load customers: {exc}")
-            customer_rows = []
-            return
-
+    def clear_search():
+        search_var.set("")
+        search_entry.focus_set()
+    def apply_filters():
+        query = search_var.get().strip().lower()
+        tree.delete(*tree.get_children())
         for customer in customer_rows:
+            searchable = " ".join(
+                [
+                    str(customer.get("name", "")),
+                    str(customer.get("email", "")),
+                    str(customer.get("phone", "")),
+                ]
+            ).lower()
+            if query and query not in searchable:
+                continue            
             try:
                 premium_value = float(customer.get("premium") or 0)
             except (TypeError, ValueError):
@@ -386,7 +530,7 @@ def open_customer_manager():
             tree.insert(
                 "",
                 tk.END,
-                iid=str(customer["id"]),
+                iid=str(customer.get("id")),
                 values=(
                     customer.get("name", ""),
                     customer.get("email", ""),
@@ -397,6 +541,55 @@ def open_customer_manager():
                     "Yes" if customer.get("converted") else "No",
                 ),
             )
+    def refresh_tree():
+        nonlocal customer_rows, name_index
+        try:
+            customer_rows = AutoMailerPro.list_customers()
+        except Exception as exc:
+            messagebox.showerror("Error", f"Unable to load customers: {exc}")
+            customer_rows = []
+            name_index = []
+            tree.delete(*tree.get_children())
+            return
+
+        name_index = sorted(
+            {
+                str(row.get("name", "")).strip()
+                for row in customer_rows
+                if str(row.get("name", "")).strip()
+            }
+        )
+        apply_filters()
+
+    def autocomplete_search(event):
+        if event.keysym in {"BackSpace", "Delete", "Left", "Right", "Up", "Down"}:
+            return
+        current_value = search_var.get().strip()
+        if not current_value:
+            return
+        matches = [
+            candidate for candidate in name_index if candidate.lower().startswith(current_value.lower())
+        ]
+        if not matches:
+            return
+        suggestion = matches[0]
+        search_entry.delete(0, tk.END)
+        search_entry.insert(0, suggestion)
+        search_entry.select_range(len(current_value), tk.END)
+        search_entry.icursor(len(current_value))
+
+    def focus_first_result(event=None):
+        items = tree.get_children()
+        if not items:
+            return
+        first = items[0]
+        tree.selection_set(first)
+        tree.focus(first)
+        tree.see(first)
+        on_select(None)
+
+    search_entry.bind("<KeyRelease>", autocomplete_search)
+    search_entry.bind("<Return>", focus_first_result)
 
     def on_select(event):
         selection = tree.selection()
@@ -446,15 +639,26 @@ def open_customer_manager():
         clear_form()
 
     def show_report():
+        filters = {
+            "include_prospects": include_prospects_var.get(),
+            "include_responded": include_responded_var.get(),
+            "include_converted": include_converted_var.get(),
+        }
+        if not any(filters.values()):
+            messagebox.showwarning(
+                "Report Filters",
+                "Select at least one premium tracking option before generating a report.",
+            )
+            return        
         try:
-            metrics = AutoMailerPro.get_customer_metrics()
+            metrics = AutoMailerPro.get_customer_metrics(filters)
         except Exception as exc:
             messagebox.showerror("Error", f"Unable to generate report: {exc}")
             return
 
         report_popup = tk.Toplevel(customer_window)
         report_popup.title("Customer Engagement Report")
-        report_popup.geometry("400x260")
+        report_popup.geometry("520x420")
         report_popup.configure(bg="#f0f4f8")
         report_popup.transient(customer_window)
         report_popup.grab_set()
@@ -469,7 +673,8 @@ def open_customer_manager():
 
         content = ttk.Frame(report_popup, padding="10")
         content.pack(fill=tk.BOTH, expand=True)
-        stats = [
+
+        overall_stats = [
             ("Total Customers", metrics.get("total_customers", 0)),
             (
                 "Responses",
@@ -487,21 +692,86 @@ def open_customer_manager():
                 "Average Home Price",
                 f"${metrics.get('average_home_price', 0.0):,.0f}",
             ),
+                        (
+                "Total Premium",
+                f"${metrics.get('total_premium', 0.0):,.2f}",
+            ),
         ]
 
-        for idx, (label, value) in enumerate(stats):
-            ttk.Label(content, text=label + ":", font=("Arial", 11, "bold")).grid(
-                row=idx, column=0, sticky=tk.W, pady=5
+        overall_frame = ttk.LabelFrame(content, text="Overall Totals", padding="10")
+        overall_frame.pack(fill=tk.X, pady=(0, 10))
+        for idx, (label, value) in enumerate(overall_stats):
+            ttk.Label(overall_frame, text=label + ":", font=("Arial", 11, "bold")).grid(
+                row=idx, column=0, sticky=tk.W, pady=3
             )
-            ttk.Label(content, text=value, font=("Arial", 11)).grid(
-                row=idx, column=1, sticky=tk.W, pady=5
+            ttk.Label(overall_frame, text=value, font=("Arial", 11)).grid(
+                row=idx, column=1, sticky=tk.W, pady=3
             )
 
+        filtered = metrics.get("filtered_totals", {})
+        filtered_frame = ttk.LabelFrame(content, text="Filtered Selection", padding="10")
+        filtered_frame.pack(fill=tk.X, pady=(0, 10))
+
+        active_filters = [
+            label
+            for label, enabled in (
+                ("Prospects", filters["include_prospects"]),
+                ("Responded", filters["include_responded"]),
+                ("Converted", filters["include_converted"]),
+            )
+            if enabled
+        ]
+        filters_text = ", ".join(active_filters) if active_filters else "None"
+        ttk.Label(
+            filtered_frame,
+            text=f"Filters Applied: {filters_text}",
+            font=("Arial", 10, "italic"),
+        ).grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8))
+
+        filtered_stats = [
+            ("Customers Included", filtered.get("total_customers", 0)),
+            ("Response Rate", f"{filtered.get('response_rate', 0.0):.1f}%"),
+            ("Conversion Rate", f"{filtered.get('conversion_rate', 0.0):.1f}%"),
+            ("Total Premium", f"${filtered.get('total_premium', 0.0):,.2f}"),
+            ("Average Premium", f"${filtered.get('average_premium', 0.0):,.2f}"),
+        ]
+
+        for idx, (label, value) in enumerate(filtered_stats, start=1):
+            ttk.Label(filtered_frame, text=label + ":", font=("Arial", 11, "bold")).grid(
+                row=idx, column=0, sticky=tk.W, pady=3
+            )
+            ttk.Label(filtered_frame, text=value, font=("Arial", 11)).grid(
+                row=idx, column=1, sticky=tk.W, pady=3
+            )
+        breakdown = metrics.get("status_breakdown", {})
+        breakdown_frame = ttk.LabelFrame(content, text="Premium by Status", padding="10")
+        breakdown_frame.pack(fill=tk.X)
+        status_labels = {
+            "prospects": "Prospects (no response yet)",
+            "responded": "Responded", 
+            "converted": "Converted Clients",
+        }
+        for idx, key in enumerate(["prospects", "responded", "converted"]):
+            data = breakdown.get(key, {})
+            ttk.Label(
+                breakdown_frame,
+                text=status_labels[key] + ":",
+                font=("Arial", 11, "bold"),
+            ).grid(row=idx, column=0, sticky=tk.W, pady=3)
+            summary_text = (
+                f"Count: {data.get('total_customers', 0)}  |  "
+                f"Premium: ${data.get('total_premium', 0.0):,.2f}  |  "
+                f"Response Rate: {data.get('response_rate', 0.0):.1f}%"
+            )
+            ttk.Label(
+                breakdown_frame,
+                text=summary_text,
+                font=("Arial", 10),
+            ).grid(row=idx, column=1, sticky=tk.W, pady=3)
     button_frame = ttk.Frame(container, padding="5")
-    button_frame.grid(row=2, column=0, columnspan=5, sticky="ew", pady=(15, 0))
-    button_frame.columnconfigure(0, weight=1)
-    button_frame.columnconfigure(1, weight=1)
-    button_frame.columnconfigure(2, weight=1)
+    button_frame.grid(row=4, column=0, columnspan=5, sticky="ew", pady=(15, 0))
+    for index in range(3):
+        button_frame.columnconfigure(index, weight=1)
 
     ttk.Button(button_frame, text="Save Customer", command=save_selected_customer).grid(
         row=0, column=0, sticky="ew", padx=5
@@ -509,16 +779,20 @@ def open_customer_manager():
     ttk.Button(button_frame, text="Clear", command=clear_form).grid(
         row=0, column=1, sticky="ew", padx=5
     )
-    ttk.Button(button_frame, text="Show Report", command=show_report).grid(
+    ttk.Button(button_frame, text="Refresh", command=refresh_tree).grid(
         row=0, column=2, sticky="ew", padx=5
     )
 
     tree.bind("<<TreeviewSelect>>", on_select)
 
     def on_close():
-        nonlocal customer_rows
+        nonlocal customer_rows, name_index, search_trace_id
         global customer_window
         customer_rows = []
+        name_index = []
+        if search_trace_id is not None:
+            search_var.trace_remove("write", search_trace_id)
+            search_trace_id = None
         clear_form()
         if customer_window is not None:
             window_to_close = customer_window
@@ -527,15 +801,195 @@ def open_customer_manager():
 
     customer_window.protocol("WM_DELETE_WINDOW", on_close)
 
-    refresh_tree()
+    def watch_search(*_):
+        apply_filters()
 
+    search_trace_id = search_var.trace_add("write", watch_search)
+
+    refresh_tree()
+    search_entry.focus_set()
 
 # Signature selection
 signature_label = tk.Label(main_frame, text="Signature:", font=("Arial", 12), bg="#f0f4f8")
 signature_label.grid(row=1, column=0, sticky=tk.W, pady=5)
-signature_var = tk.StringVar(value="Brian Jones")
-signature_dropdown = ttk.Combobox(main_frame, textvariable=signature_var, values=list(signature_profiles.keys()), state="readonly")
+signature_choices = sorted(signature_profiles.keys())
+default_signature = (
+    "Brian Jones" if "Brian Jones" in signature_profiles else (signature_choices[0] if signature_choices else "")
+)
+signature_var = tk.StringVar(value=default_signature)
+signature_dropdown = ttk.Combobox(
+    main_frame,
+    textvariable=signature_var,
+    values=signature_choices,
+    state="readonly",
+)
 signature_dropdown.grid(row=1, column=1, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+
+def update_signature_choices(selected=None):
+    values = sorted(signature_profiles.keys())
+    signature_dropdown.config(values=values)
+    if not values:
+        signature_var.set("")
+        return
+    desired = selected or signature_var.get()
+    if desired not in values:
+        desired = values[0]
+    signature_var.set(desired)
+
+def toggle_fullscreen(enabled: bool) -> None:
+    try:
+        root.attributes("-fullscreen", enabled)
+    except tk.TclError:
+        root.state("zoomed" if enabled else "normal")
+    if not enabled:
+        root.state("normal")
+
+
+def show_about_dialog() -> None:
+    about_text = dedent(
+        """
+        Auto Mailer Pro
+
+        Built with the support of GPT-5-Codex to help automate multi-stage marketing campaigns for Jones Insurance Advisors.
+        This distribution bundles a local database so each workstation tracks its own outreach and premium performance.
+        """
+    ).strip()
+    messagebox.showinfo("About Auto Mailer Pro", about_text)
+
+
+def show_instructions() -> None:
+    instructions = dedent(
+        """
+        1. Choose your signature profile or add a new teammate from the File menu.
+        2. Select the campaign mode, upload your sales data, and pick a ready-made letter template or author your own.
+        3. Run the campaign to generate personalized letters, envelopes, and reports.
+        4. Use Reports → Customer Database to search contacts, log responses, and build premium tracking summaries.
+
+        Tip: The Reports window now includes instant search with auto-complete and checkboxes to filter totals by prospects,
+        responses, and converted clients.
+        """
+    ).strip()
+    messagebox.showinfo("Auto Mailer Pro Instructions", instructions)
+
+
+def open_add_user_dialog() -> None:
+    add_window = tk.Toplevel(root)
+    add_window.title("Add Signature Profile")
+    add_window.geometry("420x280")
+    add_window.resizable(False, False)
+    add_window.transient(root)
+    add_window.grab_set()
+
+    frame = ttk.Frame(add_window, padding=15)
+    frame.pack(fill=tk.BOTH, expand=True)
+    for column in range(2):
+        frame.columnconfigure(column, weight=1)
+
+    name_var = tk.StringVar()
+    title_var = tk.StringVar()
+    email_var = tk.StringVar()
+    image_var = tk.StringVar()
+
+    ttk.Label(frame, text="Name:").grid(row=0, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(frame, textvariable=name_var).grid(row=0, column=1, sticky="ew", pady=5)
+
+    ttk.Label(frame, text="Title:").grid(row=1, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(frame, textvariable=title_var).grid(row=1, column=1, sticky="ew", pady=5)
+
+    ttk.Label(frame, text="Email:").grid(row=2, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(frame, textvariable=email_var).grid(row=2, column=1, sticky="ew", pady=5)
+
+    ttk.Label(frame, text="Signature Image:").grid(row=3, column=0, sticky=tk.W, pady=5)
+    ttk.Entry(frame, textvariable=image_var).grid(row=3, column=1, sticky="ew", pady=5)
+
+    def browse_signature_image():
+        file_path = filedialog.askopenfilename(
+            title="Select Signature Image",
+            filetypes=[
+                ("Image files", "*.png *.jpg *.jpeg *.gif *.bmp"),
+                ("All files", "*.*"),
+            ],
+        )
+        if file_path:
+            image_var.set(file_path)
+
+    ttk.Button(frame, text="Browse", command=browse_signature_image).grid(row=3, column=2, padx=5, pady=5)
+
+    def save_new_signature():
+        name = name_var.get().strip()
+        if not name:
+            messagebox.showerror("Validation Error", "Please provide the team member's name.")
+            return
+        if name in DEFAULT_SIGNATURE_PROFILES:
+            messagebox.showerror(
+                "Validation Error",
+                "That name matches a built-in signature profile. Please choose a unique name.",
+            )
+            return
+
+        title = title_var.get().strip()
+        email = email_var.get().strip()
+        image_path_input = image_var.get().strip()
+        stored_image_path = None
+
+        if image_path_input:
+            source = Path(image_path_input)
+            if not source.exists():
+                messagebox.showerror("Validation Error", "The selected signature image could not be found.")
+                return
+            CUSTOM_SIGNATURES_DIR.mkdir(parents=True, exist_ok=True)
+            suffix = source.suffix or ""
+            base_name = sanitize_filename(name)
+            destination = CUSTOM_SIGNATURES_DIR / f"{base_name}{suffix}"
+            counter = 1
+            while destination.exists():
+                destination = CUSTOM_SIGNATURES_DIR / f"{base_name}_{counter}{suffix}"
+                counter += 1
+            try:
+                shutil.copy2(source, destination)
+            except OSError as exc:
+                messagebox.showerror("Error", f"Unable to copy signature image: {exc}")
+                return
+            stored_image_path = destination
+
+        signature_profiles[name] = (name, title, stored_image_path, email)
+        persist_custom_signatures()
+        update_signature_choices(name)
+        messagebox.showinfo("Signature Saved", f"Signature profile for {name} has been added.")
+        add_window.destroy()
+
+    button_row = ttk.Frame(frame)
+    button_row.grid(row=4, column=0, columnspan=3, pady=(15, 0))
+    ttk.Button(button_row, text="Save", command=save_new_signature).grid(row=0, column=0, padx=5)
+    ttk.Button(button_row, text="Cancel", command=add_window.destroy).grid(row=0, column=1, padx=5)
+
+
+update_signature_choices(default_signature)
+
+menubar = tk.Menu(root)
+
+file_menu = tk.Menu(menubar, tearoff=0)
+file_menu.add_command(label="Add User…", command=open_add_user_dialog)
+file_menu.add_separator()
+file_menu.add_command(label="Exit", command=root.destroy)
+menubar.add_cascade(label="File", menu=file_menu)
+
+reports_menu = tk.Menu(menubar, tearoff=0)
+reports_menu.add_command(label="Customer Database", command=open_customer_manager)
+menubar.add_cascade(label="Reports", menu=reports_menu)
+
+view_menu = tk.Menu(menubar, tearoff=0)
+view_menu.add_command(label="Enter Fullscreen", command=lambda: toggle_fullscreen(True))
+view_menu.add_command(label="Exit Fullscreen", command=lambda: toggle_fullscreen(False))
+menubar.add_cascade(label="View", menu=view_menu)
+
+about_menu = tk.Menu(menubar, tearoff=0)
+about_menu.add_command(label="About", command=show_about_dialog)
+about_menu.add_command(label="Instructions", command=show_instructions)
+menubar.add_cascade(label="About", menu=about_menu)
+
+root.config(menu=menubar)
+
 
 # Mode selection
 mode_label = tk.Label(main_frame, text="Select Mode:", font=("Arial", 12), bg="#f0f4f8")
@@ -580,28 +1034,23 @@ letter_text = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("
 letter_text.grid(row=7, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 template_var.trace_add("write", lambda *args: apply_template_selection())
 apply_template_selection()
-# Customer manager button
-customer_manager_button = ttk.Button(
-    main_frame,
-    text="Customer Database & Reports",
-    command=open_customer_manager,
-    style="TButton",
-)
-customer_manager_button.grid(row=8, column=0, columnspan=4, pady=(15, 5))
+
 
 # Run button
 run_button = ttk.Button(main_frame, text="Run Campaign", command=run_campaign, style="TButton")
 run_button.grid(row=9, column=0, columnspan=4, pady=20)
+run_button.grid(row=8, column=0, columnspan=4, pady=20)
 
 # Progress bar
 progress_bar = ttk.Progressbar(main_frame, mode='indeterminate')
 progress_bar.grid(row=10, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+progress_bar.grid(row=9, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 
 # Output text
 output_label = tk.Label(main_frame, text="Output:", font=("Arial", 12), bg="#f0f4f8")
-output_label.grid(row=11, column=0, sticky=tk.W, pady=5)
+output_label.grid(row=10, column=0, sticky=tk.W, pady=5)
 output_text = scrolledtext.ScrolledText(main_frame, width=60, height=10, font=("Arial", 10), bg="white", fg="black")
-output_text.grid(row=12, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
+output_text.grid(row=11, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=5)
 
 # Redirect print output to GUI
 sys.stdout = StdoutRedirector(output_text)
@@ -614,7 +1063,7 @@ credits_label = tk.Label(
     font=("Arial", 10),
     bg="#f0f4f8"
 )
-credits_label.grid(row=13, column=0, columnspan=4, pady=20)
+credits_label.grid(row=12, column=0, columnspan=4, pady=20)
 
 root.columnconfigure(0, weight=1)
 root.rowconfigure(0, weight=1)

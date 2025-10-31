@@ -158,6 +158,7 @@ else:
 # Define signature profiles (name, title, image, email)
 DEFAULT_SIGNATURE_PROFILES = {
     "Brian Jones": (
+        "Brian Jones",
         "Vice President",
         SIGNATURES_DIR / "signature_brian.png",
         "Brian@jonesia.com",
@@ -860,7 +861,7 @@ def show_about_dialog() -> None:
 def show_instructions() -> None:
     instructions = dedent(
         """
-        1. Choose your signature profile or add a new teammate from the File menu.
+        1. Choose your signature profile or add/remove a teammate from the File menu.
         2. Select the campaign mode, upload your sales data, and pick a ready-made letter template or author your own.
         3. Run the campaign to generate personalized letters, envelopes, and reports.
         4. Use Reports → Customer Database to search contacts, log responses, and build premium tracking summaries.
@@ -962,6 +963,84 @@ def open_add_user_dialog() -> None:
     button_row.grid(row=4, column=0, columnspan=3, pady=(15, 0))
     ttk.Button(button_row, text="Save", command=save_new_signature).grid(row=0, column=0, padx=5)
     ttk.Button(button_row, text="Cancel", command=add_window.destroy).grid(row=0, column=1, padx=5)
+def open_remove_user_dialog() -> None:
+    removable = sorted(
+        name for name in signature_profiles if name not in DEFAULT_SIGNATURE_PROFILES
+    )
+    if not removable:
+        messagebox.showinfo(
+            "No Custom Signatures",
+            "There are no custom signature profiles available to remove.",
+        )
+        return
+
+    remove_window = tk.Toplevel(root)
+    remove_window.title("Remove Signature Profile")
+    remove_window.geometry("380x180")
+    remove_window.resizable(False, False)
+    remove_window.transient(root)
+    remove_window.grab_set()
+
+    frame = ttk.Frame(remove_window, padding=15)
+    frame.pack(fill=tk.BOTH, expand=True)
+    frame.columnconfigure(1, weight=1)
+
+    ttk.Label(frame, text="Select Profile:").grid(row=0, column=0, sticky=tk.W, pady=5)
+    selection_var = tk.StringVar(value=removable[0])
+    ttk.Combobox(
+        frame,
+        textvariable=selection_var,
+        values=removable,
+        state="readonly",
+    ).grid(row=0, column=1, columnspan=2, sticky="ew", pady=5)
+
+    def confirm_removal() -> None:
+        selected = selection_var.get()
+        if not selected:
+            return
+        if not messagebox.askyesno(
+            "Confirm Removal",
+            f"Are you sure you want to delete the signature profile for {selected}?",
+        ):
+            return
+
+        profile = signature_profiles.pop(selected, None)
+        if not profile:
+            messagebox.showerror(
+                "Removal Error", f"Unable to locate the signature profile for {selected}."
+            )
+            return
+
+        _, _, image_path, _ = profile
+        if image_path:
+            try:
+                candidate = Path(image_path)
+                try:
+                    within_custom = candidate.is_relative_to(CUSTOM_SIGNATURES_DIR)
+                except AttributeError:
+                    within_custom = str(candidate).startswith(str(CUSTOM_SIGNATURES_DIR))
+                if within_custom and candidate.exists():
+                    candidate.unlink()
+            except OSError as exc:
+                messagebox.showwarning(
+                    "File Warning",
+                    f"The signature image could not be deleted: {exc}",
+                )
+
+        persist_custom_signatures()
+        update_signature_choices()
+        messagebox.showinfo(
+            "Signature Removed", f"The signature profile for {selected} has been removed."
+        )
+        remove_window.destroy()
+
+    button_row = ttk.Frame(frame)
+    button_row.grid(row=1, column=0, columnspan=3, pady=(20, 0))
+    ttk.Button(button_row, text="Remove", command=confirm_removal).grid(row=0, column=0, padx=5)
+    ttk.Button(button_row, text="Cancel", command=remove_window.destroy).grid(
+        row=0, column=1, padx=5
+    )
+
 
 
 update_signature_choices(default_signature)
@@ -970,6 +1049,7 @@ menubar = tk.Menu(root)
 
 file_menu = tk.Menu(menubar, tearoff=0)
 file_menu.add_command(label="Add User…", command=open_add_user_dialog)
+file_menu.add_command(label="Remove User…", command=open_remove_user_dialog)
 file_menu.add_separator()
 file_menu.add_command(label="Exit", command=root.destroy)
 menubar.add_cascade(label="File", menu=file_menu)

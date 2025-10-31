@@ -247,14 +247,16 @@ CREATE TABLE IF NOT EXISTS campaign_contacts (
     campaign_id TEXT NOT NULL,
     mode TEXT NOT NULL,
     sent_at TEXT NOT NULL,
-    name TEXT,
-    address TEXT,
+    name TEXT NOT NULL,
+    address TEXT NOT NULL,
     zip TEXT,
     sale_date TEXT,
     sale_price REAL,
     email TEXT,
     phone TEXT,
-    source TEXT
+    source TEXT,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (campaign_id, name, address)
 )
 """
 
@@ -273,6 +275,15 @@ INSERT INTO campaign_contacts (
     phone,
     source
 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(campaign_id, name, address) DO UPDATE SET
+    mode=excluded.mode,
+    sent_at=excluded.sent_at,
+    zip=excluded.zip,
+    sale_date=excluded.sale_date,
+    sale_price=excluded.sale_price,
+    email=excluded.email,
+    phone=excluded.phone,
+    source=excluded.source
 """
 
 
@@ -299,7 +310,7 @@ def _rebuild_campaign_contacts_table(connection):
         if transferable_columns:
             column_list = ", ".join(transferable_columns)
             cursor.execute(
-                f"INSERT INTO campaign_contacts ({column_list}) "
+                f"INSERT OR IGNORE INTO campaign_contacts ({column_list}) "
                 f"SELECT {column_list} FROM campaign_contacts_legacy"
             )
         cursor.execute("DROP TABLE IF EXISTS campaign_contacts_legacy")
@@ -319,17 +330,16 @@ def _ensure_campaign_history_schema(connection):
         return
 
     existing_sql = result[0].upper()
-    if "ON CONFLICT" in existing_sql:
+    if "UNIQUE (CAMPAIGN_ID, NAME, ADDRESS)" not in existing_sql:
         _rebuild_campaign_contacts_table(connection)
         return
 
     cursor.execute("PRAGMA table_info('campaign_contacts')")
     existing_columns = [row[1] for row in cursor.fetchall()]
-    expected_columns = {"id", *CAMPAIGN_CONTACTS_COLUMNS}
+    expected_columns = {"id", "created_at", *CAMPAIGN_CONTACTS_COLUMNS}
 
     if not expected_columns.issubset(set(existing_columns)):
         _rebuild_campaign_contacts_table(connection)
-CAMPAIGN_DB_FILE = DATA_DIR / "campaign_history.db"
 WRITABLE_DATA_DIR = Path.cwd() / "data"
 CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 
@@ -337,26 +347,7 @@ CAMPAIGN_DB_PATH = WRITABLE_DATA_DIR / "campaign_history.db"
 def _initialize_campaign_db(connection: sqlite3.Connection) -> None:
     """Ensure the SQLite database has the table for campaign contacts."""
 
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS campaign_contacts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            campaign_id TEXT NOT NULL,
-            mode TEXT NOT NULL,
-            sent_at TEXT NOT NULL,
-            name TEXT NOT NULL,
-            address TEXT NOT NULL,
-            zip TEXT,
-            sale_date TEXT,
-            sale_price REAL,
-            email TEXT,
-            phone TEXT,
-            source TEXT,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (campaign_id, name, address)
-        )
-        """
-    )
+connection.execute(CAMPAIGN_CONTACTS_TABLE_SQL)
 
 
 def _append_campaign_records(
@@ -379,33 +370,7 @@ def _append_campaign_records(
         with sqlite3.connect(CAMPAIGN_DB_PATH) as connection:
             _initialize_campaign_db(connection)
 
-            insert_sql = (
-                """
-                INSERT INTO campaign_contacts (
-                    campaign_id,
-                    mode,
-                    sent_at,
-                    name,
-                    address,
-                    zip,
-                    sale_date,
-                    sale_price,
-                    email,
-                    phone,
-                    source
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(campaign_id, name, address) DO UPDATE SET
-                    mode=excluded.mode,
-                    sent_at=excluded.sent_at,
-                    zip=excluded.zip,
-                    sale_date=excluded.sale_date,
-                    sale_price=excluded.sale_price,
-                    email=excluded.email,
-                    phone=excluded.phone,
-                    source=excluded.source
-                """
-            )
+            insert_sql = CAMPAIGN_CONTACTS_INSERT_SQL
 
             payload = []
             for record in records:
@@ -522,77 +487,6 @@ def append_campaign_history(campaign_id, mode, crm_rows):
         print(f"⚠️ Failed to log campaign history: {error}")
 
 
-def append_campaign_history(campaign_id, mode, crm_rows):
-    """Append campaign contacts to the SQLite history database."""
-
-    if not crm_rows:
-        return
-
-    CAMPAIGN_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(CAMPAIGN_DB_FILE)
-
-    try:
-        cursor = connection.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS campaign_contacts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                campaign_id TEXT NOT NULL,
-                mode TEXT NOT NULL,
-                sent_at TEXT NOT NULL,
-                name TEXT,
-                address TEXT,
-                zip TEXT,
-                sale_date TEXT,
-                sale_price REAL,
-                email TEXT,
-                phone TEXT,
-                source TEXT
-            )
-            """
-        )
-
-        sent_at = datetime.utcnow().isoformat(timespec="seconds")
-        rows_to_insert = [
-            (
-                campaign_id,
-                mode,
-                sent_at,
-                row.get("Name", ""),
-                row.get("Address", ""),
-                row.get("Zip", ""),
-                row.get("Sale Date", ""),
-                float(row.get("Sale Price", 0.0) or 0.0),
-                row.get("Email", ""),
-                row.get("Phone", ""),
-                row.get("Source", ""),
-            )
-            for row in crm_rows
-        ]
-
-        cursor.executemany(
-            """
-            INSERT INTO campaign_contacts (
-                campaign_id,
-                mode,
-                sent_at,
-                name,
-                address,
-                zip,
-                sale_date,
-                sale_price,
-                email,
-                phone,
-                source
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            rows_to_insert,
-        )
-        connection.commit()
-        print(f"🗃️ Campaign history updated: {CAMPAIGN_DB_FILE}")
-    finally:
-        connection.close()
 
 
 def _compose_city_state_zip(row, zip_code):
@@ -1079,7 +973,6 @@ def main(
             mode=mode,
             sent_at=run_started_at,
         )
-        append_campaign_history(folder_name, mode, crm_rows)
     letters_doc.save(str(LETTERS_FILE))
     envelopes_doc.save(str(ENVELOPES_FILE))
     print(f"📄 All letters saved to: {LETTERS_FILE}")
